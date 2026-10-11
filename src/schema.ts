@@ -73,7 +73,10 @@ export const FILE_SURFACES: Surface[] = ["read", "write", "edit", "grep", "find"
 export type ModeColor = "muted" | "mdLink" | "accent" | "error" | "warning";
 
 /** The runtime sandbox state: `off` (none), `on` (project-writable), `ro` (read-only). */
-export type SandboxState = "off" | "on" | "ro";
+/** The runtime sandbox state: `off` (no OS sandbox), `on` (outside write-blocked,
+ *  outside reads allowed), `strict` (outside read AND write blocked at the
+ *  policy layer — the OS cannot mask system reads without breaking the shell). */
+export type SandboxState = "off" | "on" | "strict";
 
 /**
  * The OS-sandbox profile for a mode. `enabled:false` runs bash unsandboxed
@@ -156,19 +159,34 @@ export interface ModeDef {
   projectOverlay?: Partial<Record<Surface, SurfaceValue>>;
 }
 
+/** The network boundary: an independent axis (does not follow the sandbox state). */
+export interface NetworkConfig {
+  allowedDomains?: string[];
+  deniedDomains?: string[];
+  /** Ask the user live when bash reaches a host outside the allowlist (default true); false = silent deny. */
+  askOnBlockedHost?: boolean;
+}
+
 /** Top-level config: the mode registry plus cycle/default metadata. */
 export interface PermissionModeConfig {
   $schema?: string;
   defaultMode: string;
-  /** alt+m cycle order; also the display order. */
+  /** ctrl+q cycle order; also the display order. */
   cycleOrder: string[];
   modes: Record<string, ModeDef>;
   /**
-   * The shared OS-sandbox profile (allowWrite / denyRead / network / …). The
-   * per-mode `sandbox` is a legacy override; `sandboxPin` forces a state.
-   * Global-only authority; a project may only tighten it.
+   * The shared OS-sandbox profile (allowWrite / denyRead / …). The per-mode
+   * `sandbox` is a legacy override; `sandboxPin` forces a state. Global-only
+   * authority; a project may only tighten it.
    */
   sandbox?: SandboxProfile;
+  /**
+   * The network boundary — an INDEPENDENT axis with its own `ctrl+n` toggle.
+   * Global-only authority; a project may only tighten it. NOTE: the filter is
+   * implemented by the sandbox runtime's proxy, so it only applies while the
+   * sandbox state is not `off`.
+   */
+  network?: NetworkConfig;
   /** One-step plan approval settings (plan-approval.ts). Global config only. */
   plan?: PlanApprovalConfig;
   /**
@@ -196,14 +214,16 @@ export function planModeSystemPrompt(today: string): string {
   return [
     "## Plan Mode is active",
     "",
-    "In this mode bash runs read-only and only Markdown files can be created or",
-    "edited, so do not change code now.",
+    "In this mode only Markdown files can be created or edited (with the Write/Edit",
+    "tools); bash commands that would change anything are not permitted here, so do",
+    "not change code now.",
     "",
     "If the user asks you to plan a task (a feature, refactor, investigation, or any",
     "multi-step change):",
     `1. Use the **Write** tool to create the plan file at \`plan/${today}_<short-kebab-description>.md\`.`,
     "   Write creates the `plan/` directory automatically — do NOT run `mkdir` or any",
-    "   other bash command to make the folder (bash is read-only here and will fail).",
+    "   other bash command to make the folder (mutating bash is not permitted in this",
+    "   mode).",
     "2. Keep it concise but actionable — context, approach, the files to change, and",
     "   how to verify.",
     "3. Then call the **show_plan** tool with that file path — it renders the plan in",
@@ -211,7 +231,7 @@ export function planModeSystemPrompt(today: string): string {
     "   displays it.",
     "4. After show_plan, do NOT summarize, recap, or describe the plan, and add no other",
     "   commentary. Your entire reply must be a single short line: ask the user to review",
-    "   the plan and accept it in the prompt that follows (or press `alt+m` / run `/plan approve`).",
+    "   the plan and accept it in the prompt that follows (or press `ctrl+q` / run `/plan approve`).",
     "",
     "For quick questions that aren't planning tasks, just answer normally.",
   ].join("\n");

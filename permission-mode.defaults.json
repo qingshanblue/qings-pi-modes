@@ -6,7 +6,7 @@
     "plan",
     "auto",
     "edits",
-    "bypass"
+    "accept"
   ],
   "sandbox": {
     "enabled": true,
@@ -28,22 +28,22 @@
       "~/.password-store",
       "~/.pi/agent/auth.json",
       "~/.pi/agent/oauth.json"
+    ]
+  },
+  "network": {
+    "allowedDomains": [
+      "npmjs.org",
+      "*.npmjs.org",
+      "registry.npmjs.org",
+      "registry.yarnpkg.com",
+      "pypi.org",
+      "*.pypi.org",
+      "github.com",
+      "*.github.com",
+      "api.github.com",
+      "raw.githubusercontent.com"
     ],
-    "network": {
-      "allowedDomains": [
-        "npmjs.org",
-        "*.npmjs.org",
-        "registry.npmjs.org",
-        "registry.yarnpkg.com",
-        "pypi.org",
-        "*.pypi.org",
-        "github.com",
-        "*.github.com",
-        "api.github.com",
-        "raw.githubusercontent.com"
-      ],
-      "deniedDomains": []
-    }
+    "deniedDomains": []
   },
   "modes": {
     "ask": {
@@ -92,13 +92,12 @@
           "*.markdown": "allow"
         },
         "bash": {
-          "*": "allow"
+          "*": "ask"
         },
         "web_search": "allow",
         "tool": "ask",
         "skill": "ask"
-      },
-      "sandboxPin": "ro"
+      }
     },
     "auto": {
       "label": "Auto",
@@ -146,8 +145,8 @@
         "skill": "ask"
       }
     },
-    "bypass": {
-      "label": "Bypass",
+    "accept": {
+      "label": "Accept",
       "color": "error",
       "bypassProtectedPaths": true,
       "permission": {

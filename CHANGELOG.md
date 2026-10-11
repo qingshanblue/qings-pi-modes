@@ -7,6 +7,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
+- **The sandbox is reduced to the project boundary, with three hardness levels**
+  (`ctrl+s`): `off` (no OS confinement) / `on` (outside writes blocked, reads
+  allowed) / `strict` (outside read AND write blocked at the policy layer). The
+  former read-only (`ro`) state is gone — Plan's read-only bash is now enforced
+  by policy (mutations ask; read-only commands pass the whitelist) and its
+  `sandboxPin` removed.
+- **The network boundary is an independent axis**: a top-level `network` block
+  (`allowedDomains` / `deniedDomains` / `askOnBlockedHost`) with its own
+  `ctrl+n` toggle. NOTE: the filter is implemented by the sandbox runtime's
+  proxy, so it only applies while the sandbox is not `off`.
+- **Renamed `bypass` → `accept`** and removed its sandbox exemption: it
+  auto-accepts every policy decision but is still bounded by `ctrl+s`.
+- **Shortcuts**: `ctrl+q` cycles modes (alt+m alias), `ctrl+s` the sandbox
+  (alt+s alias), `ctrl+n` the network (alt+n alias).
 - **Compact footer by default.** The `perm` status is a short, readable token
   line (`Auto · sandbox:on · net:filtered · AI:haiku`: mode · sandbox · network
   · classifier). Set `"statusFormat": "verbose"` in the global config for the

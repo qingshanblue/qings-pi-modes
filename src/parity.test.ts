@@ -43,7 +43,7 @@ test("ask: confirm bash/write/web_search; reads free; out-of-project asks", () =
   });
 });
 
-test("plan: read-only sandbox (pin), Markdown-only writes, reads free", () => {
+test("plan: Markdown-only writes, read-only bash via the whitelist, reads free", () => {
   const p = M.plan;
   const sb = sbOf(p);
   assert.equal(decide(p, "write", "plan/2026-06-08_x.md"), "allow");
@@ -53,16 +53,16 @@ test("plan: read-only sandbox (pin), Markdown-only writes, reads free", () => {
   assert.equal(decide(p, "read", "src/app.ts"), "allow");
   assert.equal(decide(p, "tool", "some_extension_tool"), "ask"); // unknown tool → first-use prompt
   assert.equal(decide(p, "skill", "deep-research"), "ask");
-  assert.equal(decide(p, "bash", "ls"), "allow");
-  // bash composition: allow, sandboxed READ-ONLY (the `ro` pin).
+  assert.equal(decide(p, "bash", "ls"), "ask"); // mutations ask (read-only commands pass the whitelist)
+  // bash composition: ask, sandboxed.
   const g = bashGate(decide(p, "bash", "ls"), undefined, sb.enabled, true);
-  assert.equal(g.kind, "allow");
+  assert.equal(g.kind, "prompt");
   assert.deepEqual(bashExecPlan(sb.enabled, sb.writable, true, false), {
     sandboxed: true,
-    readOnly: true,
+    readOnly: false,
   });
   assert.equal(p.systemPrompt, "@plan"); // Plan injects the planning prompt
-  assert.equal(p.sandboxPin, "ro");
+  assert.equal(p.sandboxPin, undefined); // the sandbox is the independent axis now
 });
 
 test("edits: in-project file edits silent; bash still asks; out-of-project asks", () => {
@@ -82,8 +82,8 @@ test("edits: in-project file edits silent; bash still asks; out-of-project asks"
   assert.equal(esc.onApproveUnsandboxed, true);
 });
 
-test("bypass: everything allowed, protected paths bypassed; decoupled from the sandbox", () => {
-  const y = M.bypass;
+test("accept: everything allowed, protected paths bypassed; decoupled from the sandbox", () => {
+  const y = M.accept;
   const sb = sbOf(y); // no pin → the session default ("on")
   assert.equal(decide(y, "write", "src/app.ts"), "allow");
   assert.equal(decide(y, "bash", "rm -rf build"), "allow");
@@ -92,10 +92,10 @@ test("bypass: everything allowed, protected paths bypassed; decoupled from the s
   assert.equal(decide(y, "tool", "some_extension_tool"), "allow");
   assert.equal(decide(y, "skill", "deep-research"), "allow");
   assert.equal(y.bypassProtectedPaths, true);
-  assert.equal(y.sandboxPin, undefined); // decoupled: bypass no longer pins the sandbox off
-  // With the sandbox OFF (alt+s off / a pin), an escape is allowed silently …
+  assert.equal(y.sandboxPin, undefined); // decoupled: accept does not pin the sandbox
+  // With the sandbox OFF (ctrl+s off / a pin), an escape is allowed silently …
   assert.equal(bashGate(decide(y, "bash", "x"), OUTSIDE, false, true).kind, "allow");
-  // … with the sandbox ON the gate would prompt; a trust-all mode (index.ts)
-  // auto-approves it and runs unsandboxed (covered end-to-end in index.test.ts).
+  // … with the sandbox ON the gate would prompt; an escape in `accept` still
+  // asks the human (the sandbox boundary is human consent, not model consent).
   assert.equal(bashGate(decide(y, "bash", "x"), OUTSIDE, true, true).kind, "prompt");
 });

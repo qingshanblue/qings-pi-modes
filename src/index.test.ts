@@ -322,7 +322,7 @@ test("sandbox-writable temp dirs are in-bounds: no 'outside project' prompt, no 
 
     // YOLO doesn't sandbox, so allowWrite is meaningless — its own
     // external_directory:allow is what keeps /tmp (and everything) silent.
-    await h.perm("bypass");
+    await h.perm("accept");
     assert.equal(await h.call("write", { path: "/tmp/pi/scratch/notes.txt" }), undefined);
     assert.equal(h.ctx.prompts.length, 4);
   } finally {
@@ -576,19 +576,22 @@ test("tool visibility: respects the user's active set, hides/restores only hideT
   }
 });
 
-test("bypass: never prompts, never blocks, protected paths bypassed", { skip }, async () => {
+test("accept: never prompts, protected paths bypassed", { skip }, async () => {
   const h = await setup();
   try {
-    await h.perm("bypass");
-    assert.match(h.ctx.status, /^Bypass /);
+    await h.perm("accept");
+    assert.match(h.ctx.status, /^Accept /);
+    // The sandbox is decoupled: turn it off so the escape runs without a prompt.
+    await h.pi.commands.get("sandbox")!("off", h.ctx);
     assert.equal(await h.call("bash", { command: "sudo rm -rf /" }), undefined);
     assert.equal(await h.call("edit", { path: ".env" }), undefined);
     assert.equal(await h.call("write", { path: ".git/config" }), undefined);
     assert.equal(h.ctx.prompts.length, 0);
-    // Decoupled: bypass is sandboxed by default, so the boundary briefing is present.
+    // Sandbox off: no boundary briefing — only the scratch-dir pointer.
     const res = (await h.pi.emit("before_agent_start", { systemPrompt: "BASE" }, h.ctx)) as { systemPrompt: string };
-    assert.match(res.systemPrompt, /## Sandbox & permissions \(Bypass\)/);
+    assert.match(res.systemPrompt, /## Scratch directory \(Accept\)/);
     assert.ok(res.systemPrompt.includes(h.scratchDir));
+    assert.doesNotMatch(res.systemPrompt, /Sandbox & permissions/);
   } finally {
     h.cleanup();
   }
@@ -634,7 +637,7 @@ test("custom tools: first-use prompt in Ask (with Allow forever), silent in Bypa
     assert.equal(await h.call("my_mcp_tool", { arg: 2 }), undefined); // granted for session
     assert.equal(h.ctx.prompts.length, 1);
 
-    await h.perm("bypass");
+    await h.perm("accept");
     assert.equal(await h.call("other_tool", {}), undefined); // Bypass trusts tools
     assert.equal(h.ctx.prompts.length, 1);
   } finally {
@@ -686,7 +689,7 @@ test("skills: /skill:<name> is gated via the input event", { skip }, async () =>
 test("no UI: asks deny instead of hanging", { skip }, async () => {
   const h = await setup({ hasUI: false });
   try {
-    const bash = await h.call("bash", { command: "ls" });
+    const bash = await h.call("bash", { command: "touch x" });
     assert.equal(bash?.block, true);
     const write = await h.call("write", { path: "x.txt" });
     assert.equal(write?.block, true);
@@ -699,8 +702,8 @@ test("no UI: asks deny instead of hanging", { skip }, async () => {
 test("headless fallback: restrictive policy WITHOUT the plan prompt, not exported to children", { skip }, async () => {
   const h = await setup({ hasUI: false });
   try {
-    // The safety fallback is the read-only sandboxed mode (Plan) …
-    assert.match(h.ctx.status, /^Plan Mode /);
+    // Ask: the headless fallback is the default (ask) mode …
+    assert.match(h.ctx.status, /^Ask /);
     const denied = await h.call("write", { path: "src/app.ts" });
     assert.equal(denied?.block, true); // … and its policy fully applies
     // … but the planning system prompt is NOT injected into the headless
@@ -730,18 +733,18 @@ test("headless child with an explicitly forwarded mode keeps its system prompt",
 });
 
 test("startup: an explicit --perm flag beats a persisted session entry", { skip }, async () => {
-  const h = await setup({ permFlag: "bypass", entries: [{ type: "custom", customType: "perm-mode", data: { mode: "plan" } }] });
+  const h = await setup({ permFlag: "accept", entries: [{ type: "custom", customType: "perm-mode", data: { mode: "plan" } }] });
   try {
-    assert.match(h.ctx.status, /^Bypass /);
+    assert.match(h.ctx.status, /^Accept /);
   } finally {
     h.cleanup();
   }
 });
 
 test("startup: --perm flag wins; a persisted session entry restores the mode", { skip }, async () => {
-  const flagged = await setup({ permFlag: "bypass" });
+  const flagged = await setup({ permFlag: "accept" });
   try {
-    assert.match(flagged.ctx.status, /^Bypass /);
+    assert.match(flagged.ctx.status, /^Accept /);
   } finally {
     flagged.cleanup();
   }
@@ -760,7 +763,7 @@ test("/perm: a bare call cycles, an unknown argument prints usage without switch
     assert.match(h.ctx.status, /^Ask /);
     await h.perm("buidl");
     assert.match(h.ctx.status, /^Ask /);
-    assert.match(h.ctx.notices.at(-1) ?? "", /unknown mode or subcommand "buidl"; usage: \/perm \[ask\|plan\|auto\|edits\|bypass\|init/);
+    assert.match(h.ctx.notices.at(-1) ?? "", /unknown mode or subcommand "buidl"; usage: \/perm \[ask\|plan\|auto\|edits\|accept\|init/);
     await h.perm("");
     assert.match(h.ctx.status, /^Plan Mode /);
   } finally {
@@ -796,7 +799,8 @@ test("defaults audit: stale /perm-init copy warns per field, acknowledge silence
     h.ctx.notices.length = 0;
     await h.pi.emit("session_start", {}, h.ctx);
     const stale = h.ctx.notices.find((n) => /still hold an outdated default/.test(n)) ?? "";
-    assert.match(stale, /2 value\(s\)/); // only cycleOrder is stale; the per-mode sandbox leaves are gone (decoupled)
+    assert.match(stale, /3 value\(s\)/); // defaultMode + cycleOrder + plan's bash policy are stale
+    assert.match(stale, /defaultMode still holds the 2\.0\.0 to 2\.3\.1 default/);
     assert.match(stale, /cycleOrder still holds the 2\.0\.0 to 2\.3\.1 default/);
     assert.match(stale, /acknowledgeDefaults/);
     const upgrade = h.ctx.notices.find((n) => /updated 2\.0\.0 ->/.test(n)) ?? "";
@@ -836,7 +840,7 @@ test("/perm init scaffolds the global config once", { skip }, async () => {
     assert.ok(existsSync(file));
     // The scaffold is the stock defaults, ready to edit.
     const cfg = JSON.parse(readFileSync(file, "utf-8")) as { modes: Record<string, unknown>; $comment?: string };
-    assert.deepEqual(Object.keys(cfg.modes), ["ask", "plan", "auto", "edits", "bypass"]);
+    assert.deepEqual(Object.keys(cfg.modes), ["ask", "plan", "auto", "edits", "accept"]);
     assert.match(String(cfg.$comment), /Copied from the pi-permission-modes \d+\.\d+\.\d+ stock defaults/);
     assert.equal(Object.keys(cfg)[1], "$comment"); // right after $schema, where a reader sees it first
     // A fresh copy never trips the audit.
@@ -905,9 +909,9 @@ test("prototype names are not modes anywhere: /perm, env, session entries, headl
   try {
     const dir = path.join(g.agentDir, "permission-mode");
     mkdirSync(dir, { recursive: true });
-    writeFileSync(path.join(dir, "permission-mode.json"), JSON.stringify({ defaultMode: "bypass", cycleOrder: ["bypass"] }));
+    writeFileSync(path.join(dir, "permission-mode.json"), JSON.stringify({ defaultMode: "accept", cycleOrder: ["accept"] }));
     await g.pi.emit("session_start", {}, g.ctx);
-    assert.match(g.ctx.status, /^Plan Mode /);
+    assert.match(g.ctx.status, /^Accept /);
   } finally {
     g.cleanup();
   }
@@ -967,9 +971,12 @@ test("custom unsandboxed mode still honors bash ask", { skip }, async () => {
 test("multi-line bash commands: policy applies across newlines (no silent allow, no Bypass noise)", { skip }, async () => {
   const h = await setup();
   try {
-    // Bypass: a multi-line command used to fall through every "*" rule to the
+    // Accept: a multi-line command used to fall through every "*" rule to the
     // "ask" fallback and prompt on every heredoc/script.
-    await h.perm("bypass");
+    await h.perm("accept");
+    // Drop the OS sandbox so the heredoc runs without a prompt (the harness has
+    // no sandbox runtime; a sandboxed mode would ask).
+    await h.pi.commands.get("sandbox")!("off", h.ctx);
     assert.equal(await h.call("bash", { command: "cat <<'EOF' > notes.txt\nline one\nline two\nEOF" }), undefined);
     assert.equal(h.ctx.prompts.length, 0);
 
@@ -983,14 +990,14 @@ test("multi-line bash commands: policy applies across newlines (no silent allow,
       path.join(dir, "permission-mode.json"),
       JSON.stringify({
         modes: {
-          bypass: { permission: { bash: { "*": "allow", "rm -rf *": "deny" } } },
+          accept: { permission: { bash: { "*": "allow", "rm -rf *": "deny" } } },
           ask: { permission: { bash: { "*": "ask", "sudo *": "deny" } } },
         },
       }),
     );
     await h.pi.emit("session_start", {}, h.ctx);
 
-    await h.perm("bypass");
+    await h.perm("accept");
     assert.equal(await h.call("bash", { command: "echo 'a\nb'" }), undefined);
     const rm = await h.call("bash", { command: "rm -rf 'a\nb'" });
     assert.equal(rm?.block, true);
@@ -1408,17 +1415,17 @@ test("/classifier-model persists the model and a bare call shows it", { skip }, 
 
 // --- sandbox decoupling (alt+s / pin) ---------------------------------------
 
-test("sandbox: alt+s cycles off/on/ro and /sandbox sets it", { skip }, async () => {
+test("sandbox: ctrl+s cycles off/on/strict and /sandbox sets it", { skip }, async () => {
   const h = await setup();
   try {
-    const altS = h.pi.shortcuts.get("alt+s")!;
-    await altS(h.ctx); // on → ro
-    assert.match(h.ctx.notices.at(-1) ?? "", /read-only/);
-    assert.deepEqual(h.pi.entries.at(-1), { customType: "perm-sandbox", data: { state: "ro" } });
-    await altS(h.ctx); // ro → off
+    const ctrlS = h.pi.shortcuts.get("ctrl+s")!;
+    await ctrlS(h.ctx); // on → strict
+    assert.match(h.ctx.notices.at(-1) ?? "", /sandbox STRICT/);
+    assert.deepEqual(h.pi.entries.at(-1), { customType: "perm-sandbox", data: { state: "strict" } });
+    await ctrlS(h.ctx); // strict → off
     assert.match(h.ctx.notices.at(-1) ?? "", /sandbox OFF/);
-    await altS(h.ctx); // off → on
-    assert.match(h.ctx.notices.at(-1) ?? "", /sandbox on/);
+    await ctrlS(h.ctx); // off → on
+    assert.match(h.ctx.notices.at(-1) ?? "", /sandbox ON/);
     // Direct set via the command.
     h.ctx.notices.length = 0;
     await h.pi.commands.get("sandbox")!("off", h.ctx);
@@ -1431,17 +1438,23 @@ test("sandbox: alt+s cycles off/on/ro and /sandbox sets it", { skip }, async () 
   }
 });
 
-test("sandbox: a pinned mode overrides alt+s (plan pins ro; bypass does not pin)", { skip }, async () => {
+test("sandbox: a pinned mode overrides ctrl+s", { skip }, async () => {
   const h = await setup();
   try {
-    await h.perm("plan");
+    const dir = path.join(h.agentDir, "permission-mode");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, "permission-mode.json"),
+      JSON.stringify({ modes: { locked: { label: "Locked", color: "error", sandboxPin: "strict", permission: {} } } }),
+    );
+    await h.pi.emit("session_start", {}, h.ctx);
+    await h.perm("locked");
     h.ctx.notices.length = 0;
-    await h.pi.shortcuts.get("alt+s")!(h.ctx);
-    assert.match(h.ctx.notices.join("\n"), /Plan Mode pins "ro"/);
-    await h.perm("bypass");
+    await h.pi.shortcuts.get("ctrl+s")!(h.ctx);
+    assert.match(h.ctx.notices.join("\n"), /Locked pins "strict"/);
+    await h.perm("ask");
     h.ctx.notices.length = 0;
-    await h.pi.shortcuts.get("alt+s")!(h.ctx);
-    // Decoupled: bypass has no pin, so alt+s applies and there is no pin note.
+    await h.pi.shortcuts.get("ctrl+s")!(h.ctx);
     assert.match(h.ctx.notices.join("\n"), /sandbox/);
     assert.doesNotMatch(h.ctx.notices.join("\n"), /pins/);
   } finally {

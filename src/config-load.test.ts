@@ -55,8 +55,8 @@ test("loadStockDefaults: reads the shipped JSON → five modes, correct defaults
   const c = loadStockDefaults((m) => errors.push(m));
   assert.equal(errors.length, 0, errors.join("; ")); // stock file present & valid
   assert.equal(c.defaultMode, "ask");
-  assert.deepEqual(c.cycleOrder, ["ask", "plan", "auto", "edits", "bypass"]);
-  assert.deepEqual(Object.keys(c.modes).sort(), ["ask", "auto", "bypass", "edits", "plan"]);
+  assert.deepEqual(c.cycleOrder, ["ask", "plan", "auto", "edits", "accept"]);
+  assert.deepEqual(Object.keys(c.modes).sort(), ["accept", "ask", "auto", "edits", "plan"]);
   assert.ok(stockDefaultsFile().endsWith("permission-mode.defaults.json"));
 });
 
@@ -73,7 +73,7 @@ test("loadModeConfig: no files → the five built-in modes", () => {
   const s = sandbox();
   const c = loadModeConfig(s.cwd, s.agentDir, (m) => s.errors.push(m));
   assert.equal(c.defaultMode, "ask");
-  assert.deepEqual(Object.keys(c.modes).sort(), ["ask", "auto", "bypass", "edits", "plan"]);
+  assert.deepEqual(Object.keys(c.modes).sort(), ["accept", "ask", "auto", "edits", "plan"]);
   assert.equal(s.errors.length, 0);
   s.cleanup();
 });
@@ -150,7 +150,7 @@ test("project: tighten-only — can tighten, never loosen", () => {
       sandbox: { enabled: false, writable: false, allowWrite: ["."], denyRead: ["~/.config"] },
       modes: {
         ask: { permission: { bash: "deny", write: "allow" } },
-        bypass: { sandboxPin: "on" },
+        accept: { sandboxPin: "on" },
       },
     },
   });
@@ -164,8 +164,8 @@ test("project: tighten-only — can tighten, never loosen", () => {
   assert.ok(s.errors.some((e) => /cannot change sandbox\.enabled/.test(e)));
   // Project may force read-only, and cannot set a mode's sandboxPin.
   assert.equal(c.sandbox?.writable, false);
-  assert.equal(c.modes.bypass.sandboxPin, undefined); // bypass no longer pins (decoupled)
-  assert.ok(s.errors.some((e) => /cannot set sandboxPin for mode "bypass"/.test(e)));
+  assert.equal(c.modes.accept.sandboxPin, undefined); // bypass no longer pins (decoupled)
+  assert.ok(s.errors.some((e) => /cannot set sandboxPin for mode "accept"/.test(e)));
   s.cleanup();
 });
 
@@ -184,8 +184,8 @@ test("project: sandbox intersect/union + unsafe domains rejected", () => {
         allowWrite: ["."], // intersect with the stock ['.','/tmp/pi'] → ['.']
         denyRead: ["~/.config"], // union
         allowRead: ["~/.cache", "~/.local"], // intersect with the stock carve-outs: a project cannot open new ones
-        network: { allowedDomains: ["github.com", "*.com"] }, // *.com rejected
       },
+      network: { allowedDomains: ["github.com", "*.com"] }, // *.com rejected
     },
   });
   const c = loadModeConfig(s.cwd, s.agentDir, (m) => s.errors.push(m));
@@ -193,7 +193,7 @@ test("project: sandbox intersect/union + unsafe domains rejected", () => {
   assert.deepEqual(sb.allowWrite, ["."]); // intersected
   assert.ok(sb.denyRead?.includes("~/.config") && sb.denyRead?.includes("~/.ssh")); // unioned
   assert.deepEqual(sb.allowRead, [], "the stock profile has no carve-outs, so the project cannot add any");
-  assert.deepEqual(sb.network?.allowedDomains, ["github.com"]); // *.com dropped (intersect of safe)
+  assert.deepEqual(c.network?.allowedDomains, ["github.com"]); // *.com dropped (intersect of safe)
   assert.ok(s.errors.some((e) => /overly-broad/.test(e)));
   s.cleanup();
 });
@@ -213,7 +213,7 @@ test("project: cannot add a mode or change defaults", () => {
 test("malformed JSON keeps prior layer and reports the error", () => {
   const s = sandbox({ global: "{ not valid json " });
   const c = loadModeConfig(s.cwd, s.agentDir, (m) => s.errors.push(m));
-  assert.deepEqual(Object.keys(c.modes).sort(), ["ask", "auto", "bypass", "edits", "plan"]); // defaults intact
+  assert.deepEqual(Object.keys(c.modes).sort(), ["accept", "ask", "auto", "edits", "plan"]); // defaults intact
   assert.ok(s.errors.some((e) => /could not parse/.test(e)));
   s.cleanup();
 });
@@ -270,7 +270,7 @@ test("profileToConfig output validates against the runtime's SandboxRuntimeConfi
     assert.doesNotThrow(() => runtimeSchema!.parse(readOnlyOverride(cfg, ["/tmp/pi/s1"])));
     checked.push(name);
   }
-  assert.deepEqual(checked, ["ask", "plan", "auto", "edits", "bypass"]);
+  assert.deepEqual(checked, ["ask", "plan", "auto", "edits", "accept"]);
   // The README's strict-home shape (denyRead "~" with allowRead carve-outs) validates as well.
   const strict = profileToConfig({ ...stock.sandbox!, denyRead: ["~"], allowRead: [".", "/tmp/pi", "~/.cache"] });
   assert.doesNotThrow(() => runtimeSchema!.parse({ network: strict.network, filesystem: strict.filesystem }));
@@ -303,20 +303,20 @@ test("persistModeRule: creates the global file with the learned rule, round-trip
 
 test("persistModeDomains: appends to the FULL stock+global allowlist, round-trips", () => {
   const s = sandbox();
-  const stockDomains = loadStockDefaults().sandbox?.network?.allowedDomains ?? [];
+  const stockDomains = loadStockDefaults().network?.allowedDomains ?? [];
   const file = persistModeDomains(s.agentDir, "ask", ["api.internal.io"]);
   const written = JSON.parse(readFileSync(file, "utf-8"));
   // mergeGlobal replaces `network` wholesale, so the stock domains must be
   // baked into the persisted list or they'd be lost on the next load.
-  const list = written.sandbox.network.allowedDomains as string[];
+  const list = written.network.allowedDomains as string[];
   for (const d of stockDomains) assert.ok(list.includes(d), `stock domain ${d} preserved`);
   assert.ok(list.includes("api.internal.io"));
   const c = loadModeConfig(s.cwd, s.agentDir, () => {});
-  assert.ok(c.sandbox?.network?.allowedDomains?.includes("api.internal.io"));
-  assert.ok(c.sandbox?.network?.allowedDomains?.includes(stockDomains[0]));
+  assert.ok(c.network?.allowedDomains?.includes("api.internal.io"));
+  assert.ok(c.network?.allowedDomains?.includes(stockDomains[0]));
   // Idempotent: persisting again doesn't duplicate.
   persistModeDomains(s.agentDir, "ask", ["api.internal.io"]);
-  const again = JSON.parse(readFileSync(file, "utf-8")).sandbox.network.allowedDomains as string[];
+  const again = JSON.parse(readFileSync(file, "utf-8")).network.allowedDomains as string[];
   assert.equal(again.filter((d) => d === "api.internal.io").length, 1);
   s.cleanup();
 });
@@ -324,21 +324,21 @@ test("persistModeDomains: appends to the FULL stock+global allowlist, round-trip
 test("persistModeDomains: never bakes a project's tightened list into the global config", () => {
   // Project intersects the allowlist down to one domain; a forever-grant made
   // while that project is open must still persist against the UNTIGHTENED base.
-  const s = sandbox({ project: { sandbox: { network: { allowedDomains: ["github.com"] } } } });
-  const stockDomains = loadStockDefaults().sandbox?.network?.allowedDomains ?? [];
+  const s = sandbox({ project: { network: { allowedDomains: ["github.com"] } } });
+  const stockDomains = loadStockDefaults().network?.allowedDomains ?? [];
   const file = persistModeDomains(s.agentDir, "ask", ["api.internal.io"]);
-  const list = JSON.parse(readFileSync(file, "utf-8")).sandbox.network.allowedDomains as string[];
+  const list = JSON.parse(readFileSync(file, "utf-8")).network.allowedDomains as string[];
   for (const d of stockDomains) assert.ok(list.includes(d), `stock domain ${d} not lost to project tightening`);
   s.cleanup();
 });
 
 test("project: askOnBlockedHost can be forced off (silent deny), never back on", () => {
   const s = sandbox({
-    global: { sandbox: { askOnBlockedHost: false } },
-    project: { sandbox: { askOnBlockedHost: true } },
+    global: { network: { askOnBlockedHost: false } },
+    project: { network: { askOnBlockedHost: true } },
   });
   const c = loadModeConfig(s.cwd, s.agentDir, (m) => s.errors.push(m));
-  assert.equal(c.sandbox?.askOnBlockedHost, false); // project cannot re-enable asking
+  assert.equal(c.network?.askOnBlockedHost, false); // project cannot re-enable asking
   s.cleanup();
 });
 
@@ -450,16 +450,16 @@ test("persistModeRule/persistModeDomains refuse to clobber an unparsable or malf
 test("persistModeRule seeds the map from the effective stock+global surface, never from a project overlay", () => {
   // Bypass's stock `tool` is "allow"; the project tightens it to "ask" - the
   // seed must still be allow so other tools in other projects stay silent.
-  const s = sandbox({ project: { modes: { bypass: { permission: { tool: "ask" } } } } });
-  const file = persistModeRule(s.agentDir, "bypass", "tool", "myTool", "allow");
-  const written = JSON.parse(readFileSync(file, "utf-8")) as { $schema?: string; modes: { bypass: { permission: { tool: Record<string, string> } } } };
-  assert.deepEqual(written.modes.bypass.permission.tool, { "*": "allow", myTool: "allow" });
+  const s = sandbox({ project: { modes: { accept: { permission: { tool: "ask" } } } } });
+  const file = persistModeRule(s.agentDir, "accept", "tool", "myTool", "allow");
+  const written = JSON.parse(readFileSync(file, "utf-8")) as { $schema?: string; modes: { accept: { permission: { tool: Record<string, string> } } } };
+  assert.deepEqual(written.modes.accept.permission.tool, { "*": "allow", myTool: "allow" });
   assert.match(written.$schema ?? "", /^https:\/\//); // a fresh file gets the URL schema
   // A global string shorthand seeds from the file's own value.
-  writeFileSync(file, JSON.stringify({ modes: { bypass: { permission: { tool: "deny" } } } }));
-  persistModeRule(s.agentDir, "bypass", "tool", "other", "allow");
-  const again = JSON.parse(readFileSync(file, "utf-8")) as { modes: { bypass: { permission: { tool: Record<string, string> } } } };
-  assert.deepEqual(again.modes.bypass.permission.tool, { "*": "deny", other: "allow" });
+  writeFileSync(file, JSON.stringify({ modes: { accept: { permission: { tool: "deny" } } } }));
+  persistModeRule(s.agentDir, "accept", "tool", "other", "allow");
+  const again = JSON.parse(readFileSync(file, "utf-8")) as { modes: { accept: { permission: { tool: Record<string, string> } } } };
+  assert.deepEqual(again.modes.accept.permission.tool, { "*": "deny", other: "allow" });
   s.cleanup();
 });
 
@@ -527,13 +527,13 @@ test("sandbox: top-level profile merges; per-mode sandboxPin is validated (bad o
   const s = sandbox({
     global: {
       sandbox: { allowWrite: ["."], denyRead: ["~/.config"] },
-      modes: { ask: { sandboxPin: "ro" }, edits: { sandboxPin: "bogus" } },
+      modes: { ask: { sandboxPin: "strict" }, edits: { sandboxPin: "bogus" } },
     },
   });
   const c = loadModeConfig(s.cwd, s.agentDir, (m) => s.errors.push(m));
   assert.deepEqual(c.sandbox?.allowWrite, ["."]); // global override of the stock profile
   assert.ok(c.sandbox?.denyRead?.includes("~/.config"));
-  assert.equal(c.modes.ask.sandboxPin, "ro");
+  assert.equal(c.modes.ask.sandboxPin, "strict");
   assert.equal(c.modes.edits.sandboxPin, undefined); // invalid value dropped
   assert.ok(s.errors.some((e) => /sandboxPin in global mode "edits"/.test(e)));
   s.cleanup();
