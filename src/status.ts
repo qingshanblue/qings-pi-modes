@@ -23,6 +23,7 @@ export function updateStatus(
   mode: ModeDef,
   sandbox: Pick<SandboxController, "ready" | "warn" | "disabled">,
   networkOpen: boolean,
+  classifierLabel?: string,
 ): void {
   const t = ctx.ui.theme;
   const enforcing = mode.sandbox.enabled && sandbox.ready;
@@ -37,5 +38,6 @@ export function updateStatus(
   } else {
     status += "  " + t.fg("dim", "Network: open");
   }
+  if (classifierLabel && mode.classifier) status += "  " + t.fg(mode.color, classifierLabel);
   ctx.ui.setStatus("perm", status);
 }

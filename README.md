@@ -1,6 +1,10 @@
-# pi-permission-modes
+# qings-pi-modes
 
-[![CI](https://github.com/wynainfo/pi-permission-modes/actions/workflows/ci.yml/badge.svg)](https://github.com/wynainfo/pi-permission-modes/actions/workflows/ci.yml)
+> Qing's permission modes for [pi](https://pi.dev) - a fork of
+> [wynainfo/pi-permission-modes](https://github.com/wynainfo/pi-permission-modes)
+> that adds an AI **`automode`** (classifier-reviewed permissions).
+
+[![CI](https://github.com/qingshanblue/qings-pi-modes/actions/workflows/ci.yml/badge.svg)](https://github.com/qingshanblue/qings-pi-modes/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Switchable, **user-definable** permission modes for the [pi](https://pi.dev)
@@ -9,8 +13,8 @@ coding agent. Each mode is a JSON bundle of an **OS-level sandbox profile**
 surface (bash, file tools, the project boundary, web search, extension tools,
 skills). Bash gating uses a real **tree-sitter** AST, not a regex.
 
-Four modes ship by default - **Default → Plan Mode → Build → YOLO** - and you can
-retune them or add your own in `permission-mode.json`.
+Five modes ship by default - **Default → Plan Mode → Build → Auto → YOLO** - and
+you can retune them or add your own in `permission-mode.json`.
 
 See [SECURITY.md](SECURITY.md) for the threat model,
 [CHANGELOG.md](CHANGELOG.md) for releases, and [CONTRIBUTING.md](CONTRIBUTING.md)
@@ -20,24 +24,18 @@ to hack on it.
 
 ## Install
 
-From npm (recommended):
+From GitHub:
 
 ```bash
-pi install npm:pi-permission-modes
-```
-
-or straight from GitHub:
-
-```bash
-pi install git:github.com/wynainfo/pi-permission-modes
+pi install git:github.com/qingshanblue/qings-pi-modes
 ```
 
 `pi install` fetches the package and runs `npm install` for you, so
 `@anthropic-ai/sandbox-runtime` comes along automatically; the pi SDK is
 provided by the host. Useful variants:
 
-- `pi install npm:pi-permission-modes@2.1.1` - pin a version (`pi update` won't advance it)
-- `pi install -l npm:pi-permission-modes` - project-local install (`.pi/npm/`, shareable with your team)
+- `pi install git:github.com/qingshanblue/qings-pi-modes@v2.4.1` - pin a tag (`pi update` won't advance it)
+- `pi install -l git:github.com/qingshanblue/qings-pi-modes` - project-local install (shareable with your team)
 - `pi update --extensions` - pull the latest release later
 
 To try it without adding it to your config, run it directly from a
@@ -95,7 +93,8 @@ Cycle with **`alt+m`** or set directly with **`/perm <mode>`**. The current mode
 is persisted per session (survives `/reload`, resume, and branch navigation) and
 shown in the footer.
 
-Default, Plan Mode, and Build all run in-project `bash` inside the OS sandbox.
+Default, Plan Mode, Build, and Auto all run in-project `bash` inside the OS
+sandbox.
 The footer always shows the mode, the network state, and their shortcuts -
 e.g. `Build (sandboxed in project dir, alt+m)  Network: filtered (alt+n)` -
 with the network chip green while the domain allowlist filters and orange when
@@ -109,6 +108,7 @@ be retuned, and you can add your own, in `permission-mode.json` (see
 | **Default** | Confirm every `bash`/`edit`/`write`; reads are free. Approved **in-project** `bash` runs **sandboxed** (writes confined to the project). |
 | **Plan Mode** | Planning mode. Reads are free; in-project `bash` runs **sandboxed read-only** (writes/deletes fail), so only read commands effectively work. The one mutation allowed without confirmation is **creating/editing Markdown** (`*.md`/`*.markdown`) inside the project - other `edit`/`write` are blocked. A system-prompt addition steers the model: for a planning task, write the plan to `plan/<YYYY-MM-DD>_<description>.md`, render it for review with the **`show_plan`** tool, then hand over to you: an **Accept / Decline** prompt follows the plan (see [Approving a plan](#approving-a-plan)). |
 | **Build** | Reads, writes, and `bash` **inside the project** run with no confirmation; in-project `bash` runs **sandboxed**. |
+| **Auto** | Reads are free; `bash`/`edit`/`write`, out-of-project access, web search, and extension tools are judged by the **AI safety classifier** instead of prompting you (see [AI automode](#ai-automode)). Runs **sandboxed**; an action that would run unsandboxed (an escape, privilege escalation, or a degraded sandbox) still goes to a human. |
 | **YOLO** | Never prompts, never sandboxes, no protected-path backstop. Can do anything the current user can. |
 
 In every mode except YOLO: **out-of-project** access prompts; `bash` that
@@ -273,6 +273,50 @@ wall - a request to a host outside the allowlist **pauses while you're asked**
 Grants, denies, and the open toggle are **session-scoped** (except "Allow
 forever") and apply instantly - no sandbox restart.
 
+### AI automode
+
+**Auto** answers a mode's `ask` decisions with an **AI safety classifier**
+instead of a human prompt - the closest analogue to Claude Code's auto mode. It
+is the only shipped mode with `"classifier": true`.
+
+- The classifier runs **in-process** through pi's model layer, so it uses your
+  real request auth (models.json, OAuth, env keys) and needs no extra setup.
+- The model defaults to **`"current"`** - the active session model - so it
+  follows `/model` with no configuration. Change it with
+  **`/classifier-model <provider/model>`** (or `/classifier-model current` to go
+  back); the value is saved to the global config's `classifier.model`.
+- It only reviews actions whose policy resolves to **`ask`**. `allow` actions run
+  untouched (reads are never sent to the model) and `deny` actions are blocked
+  before the classifier sees them.
+- **Safety boundary:** an action that would run bash **unsandboxed** (an
+  out-of-project escape, privilege escalation, or a degraded sandbox) is never
+  auto-approved - it always goes to the human prompt.
+- **Fail-closed by default:** if the classifier errors, times out, or returns
+  unusable output, the action is **blocked**. Set `classifier.failClosed: false`
+  to fall back to the human prompt instead.
+- After `classifier.maxConsecutiveDenials` consecutive denials (default 3) it
+  offers the human prompt once, so you are not stuck.
+- The footer shows the reviewer, e.g.
+  `Auto (alt+m)  Network: open  AI:claude-haiku-4-5`.
+
+Configure the reviewer in the global `permission-mode.json`:
+
+```json
+{
+  "classifier": {
+    "enabled": true,
+    "model": "current",
+    "timeoutMs": 15000,
+    "failClosed": true,
+    "maxConsecutiveDenials": 3
+  }
+}
+```
+
+Classifier settings are **global-only** - a project config cannot point the
+reviewer at a weaker model. To make your own AI mode, set `"classifier": true`
+on any mode.
+
 ### CLI flags
 
 - `--perm <mode>` - start in a given mode (any defined mode name).
@@ -406,15 +450,21 @@ Modes are data, layered in this order:
 
 ```jsonc
 {
-  "$schema": "https://raw.githubusercontent.com/wynainfo/pi-permission-modes/main/schemas/permission-mode.schema.json",
+  "$schema": "https://raw.githubusercontent.com/qingshanblue/qings-pi-modes/main/schemas/permission-mode.schema.json",
   "defaultMode": "default",
-  "cycleOrder": ["default", "plan", "build", "yolo"],
+  "cycleOrder": ["default", "plan", "build", "automode", "yolo"],
+  "classifier": {                       // AI safety classifier for modes with "classifier": true
+    "model": "current",                 // "current" = the active session model; else "provider/model"
+    "timeoutMs": 15000,
+    "failClosed": true                   // error/timeout blocks the action (false = fall back to a prompt)
+  },
   "modes": {
     "default": {                        // values here are illustrative - run /perm init for the real defaults
       "label": "Default",
-      "color": "muted",                 // muted | mdLink | accent | error
+      "color": "muted",                 // muted | mdLink | accent | error | warning
       "systemPrompt": "@plan",          // optional; "@plan" = the dated Plan-mode prompt
       "injectSandboxInfo": true,        // inject the mode's sandbox boundaries into the system prompt (default true)
+      "classifier": false,               // true = route this mode's "ask" decisions to the AI classifier
       "sandbox": {
         "enabled": true,                // false = run bash unsandboxed (YOLO-style)
         "writable": true,               // false = bash runs read-only (Plan-style)
@@ -552,6 +602,5 @@ Add a mode under `modes` in the global config and (optionally) list it in
 
 - Temporarily: launch pi with `--no-extensions` (disables all), or `--no-sandbox`
   to keep the modes but drop OS sandboxing.
-- Permanently: `pi remove npm:pi-permission-modes` (or
-  `git:github.com/wynainfo/pi-permission-modes`, matching how you installed
-  it) - or remove the entry from your pi settings.
+- Permanently: `pi remove git:github.com/qingshanblue/qings-pi-modes` (matching
+  how you installed it) - or remove the entry from your pi settings.

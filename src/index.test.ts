@@ -117,9 +117,22 @@ interface FakeCtx {
     theme: { fg(color: string, text: string): string };
   };
   sessionManager: { getEntries(): Array<{ type: string; customType?: string; data?: unknown }>; getSessionId(): string };
+  /** Optional classifier plumbing — set by the automode tests. */
+  modelRegistry?: { find?(provider: string, id: string): unknown; complete?(model: unknown, context: unknown, options: unknown): Promise<unknown> };
+  model?: { id: string; provider: string };
+  signal?: AbortSignal;
 }
 
-function makeCtx(cwd: string, opts: { hasUI?: boolean; entries?: Array<{ type: string; customType?: string; data?: unknown }> } = {}): FakeCtx {
+function makeCtx(
+  cwd: string,
+  opts: {
+    hasUI?: boolean;
+    entries?: Array<{ type: string; customType?: string; data?: unknown }>;
+    modelRegistry?: FakeCtx["modelRegistry"];
+    model?: FakeCtx["model"];
+    signal?: AbortSignal;
+  } = {},
+): FakeCtx {
   const ctx: FakeCtx = {
     hasUI: opts.hasUI ?? true,
     cwd,
@@ -148,6 +161,9 @@ function makeCtx(cwd: string, opts: { hasUI?: boolean; entries?: Array<{ type: s
     },
     sessionManager: { getEntries: () => opts.entries ?? [], getSessionId: () => "sess-test" },
   };
+  if (opts.modelRegistry) ctx.modelRegistry = opts.modelRegistry;
+  if (opts.model) ctx.model = opts.model;
+  if (opts.signal) ctx.signal = opts.signal;
   return ctx;
 }
 
@@ -182,6 +198,10 @@ async function setup(
     /** Simulate a parent-forwarded PI_PERMISSION_MODE. */
     envMode?: string;
     entries?: Array<{ type: string; customType?: string; data?: unknown }>;
+    /** Classifier plumbing for automode tests. */
+    modelRegistry?: FakeCtx["modelRegistry"];
+    model?: FakeCtx["model"];
+    signal?: AbortSignal;
   } = {},
 ): Promise<Harness> {
   const base = mkdtempSync(path.join(tmpdir(), "perm-idx-"));
@@ -739,7 +759,7 @@ test("/perm: a bare call cycles, an unknown argument prints usage without switch
     assert.match(h.ctx.status, /^Default /);
     await h.perm("buidl");
     assert.match(h.ctx.status, /^Default /);
-    assert.match(h.ctx.notices.at(-1) ?? "", /unknown mode or subcommand "buidl"; usage: \/perm \[default\|plan\|build\|yolo\|init/);
+    assert.match(h.ctx.notices.at(-1) ?? "", /unknown mode or subcommand "buidl"; usage: \/perm \[default\|plan\|build\|automode\|yolo\|init/);
     await h.perm("");
     assert.match(h.ctx.status, /^Plan Mode /);
   } finally {
@@ -775,14 +795,14 @@ test("defaults audit: stale /perm-init copy warns per field, acknowledge silence
     h.ctx.notices.length = 0;
     await h.pi.emit("session_start", {}, h.ctx);
     const stale = h.ctx.notices.find((n) => /still hold an outdated default/.test(n)) ?? "";
-    assert.match(stale, /6 value\(s\)/); // allowWrite (changed in 2.3.0) and denyRead (changed in 2.4.0) in each sandboxed mode
+    assert.match(stale, /7 value\(s\)/); // cycleOrder plus allowWrite (2.3.0) and denyRead (2.4.0) in each sandboxed mode
     for (const m of ["default", "plan", "build"]) {
       assert.match(stale, new RegExp(`modes\\.${m}\\.sandbox\\.allowWrite still holds the 2\\.0\\.0 to 2\\.2\\.1 default`));
       assert.match(stale, new RegExp(`modes\\.${m}\\.sandbox\\.denyRead still holds the 2\\.0\\.0 to 2\\.3\\.1 default`));
     }
     assert.match(stale, /acknowledgeDefaults/);
     const upgrade = h.ctx.notices.find((n) => /updated 2\.0\.0 ->/.test(n)) ?? "";
-    assert.match(upgrade, /stock defaults changed for modes\.default\.sandbox\.allowWrite/);
+    assert.match(upgrade, /stock defaults changed for .*modes\.default\.sandbox\.allowWrite/);
     // State recorded: the notice does not repeat on the next start.
     assert.match(readFileSync(path.join(dir, "state.json"), "utf-8"), /"lastVersion"/);
     h.ctx.notices.length = 0;
@@ -818,7 +838,7 @@ test("/perm init scaffolds the global config once", { skip }, async () => {
     assert.ok(existsSync(file));
     // The scaffold is the stock defaults, ready to edit.
     const cfg = JSON.parse(readFileSync(file, "utf-8")) as { modes: Record<string, unknown>; $comment?: string };
-    assert.deepEqual(Object.keys(cfg.modes), ["default", "plan", "build", "yolo"]);
+    assert.deepEqual(Object.keys(cfg.modes), ["default", "plan", "build", "automode", "yolo"]);
     assert.match(String(cfg.$comment), /Copied from the pi-permission-modes \d+\.\d+\.\d+ stock defaults/);
     assert.equal(Object.keys(cfg)[1], "$comment"); // right after $schema, where a reader sees it first
     // A fresh copy never trips the audit.
@@ -1279,6 +1299,112 @@ test("bare-word symlink out of the project prompts as an escape and can be denie
     assert.match(again?.reason ?? "", /blocked for this session/);
   } finally {
     rmSync(outside, { recursive: true, force: true });
+    h.cleanup();
+  }
+});
+
+// --- AI classifier / automode ------------------------------------------------
+
+/** A model-registry stub whose completion returns a scripted reply (or throws). */
+function classifierRegistry(reply: () => unknown) {
+  const calls: Array<{ model: unknown; context: any; options: any }> = [];
+  return {
+    calls,
+    find: () => undefined,
+    complete: async (model: unknown, context: any, options: any) => {
+      calls.push({ model, context, options });
+      return reply();
+    },
+  };
+}
+const allowReply = () => ({ content: [{ type: "text", text: '{"allow":true,"risk":"low","reason":"ok"}' }] });
+const denyReply = () => ({ content: [{ type: "text", text: '{"allow":false,"risk":"high","reason":"secret access"}' }] });
+
+test("automode: an allowed ask runs without prompting; status shows the classifier", { skip }, async () => {
+  const registry = classifierRegistry(allowReply);
+  const h = await setup({ permFlag: "automode", modelRegistry: registry, model: { id: "m", provider: "p" } });
+  try {
+    assert.match(h.ctx.status, /^Auto /);
+    assert.match(h.ctx.status, /AI:m/);
+    const res = await h.call("write", { path: "src/app.ts", content: "x" });
+    assert.equal(res, undefined); // allowed, not blocked
+    assert.equal(h.ctx.prompts.length, 0); // never asked the human
+    assert.equal(registry.calls.length, 1);
+    assert.equal(registry.calls[0].options.maxRetries, 0); // single bounded attempt
+  } finally {
+    h.cleanup();
+  }
+});
+
+test("automode: a denied ask is blocked without prompting", { skip }, async () => {
+  const registry = classifierRegistry(denyReply);
+  const h = await setup({ permFlag: "automode", modelRegistry: registry, model: { id: "m", provider: "p" } });
+  try {
+    const res = await h.call("write", { path: "src/app.ts", content: "x" });
+    assert.equal(res?.block, true);
+    assert.equal(h.ctx.prompts.length, 0);
+    assert.ok(h.ctx.notices.some((n) => /auto blocked/.test(n)));
+  } finally {
+    h.cleanup();
+  }
+});
+
+test("automode: a classifier failure fails closed (blocks) by default", { skip }, async () => {
+  const registry = classifierRegistry(() => {
+    throw new Error("boom");
+  });
+  const h = await setup({ permFlag: "automode", modelRegistry: registry, model: { id: "m", provider: "p" } });
+  try {
+    const res = await h.call("write", { path: "src/app.ts", content: "x" });
+    assert.equal(res?.block, true);
+    assert.ok(h.ctx.notices.some((n) => /classifier unavailable/.test(n)));
+  } finally {
+    h.cleanup();
+  }
+});
+
+test("automode: failClosed:false falls back to the human prompt", { skip }, async () => {
+  const registry = classifierRegistry(() => {
+    throw new Error("boom");
+  });
+  const h = await setup({ permFlag: "automode", modelRegistry: registry, model: { id: "m", provider: "p" } });
+  try {
+    const dir = path.join(h.agentDir, "permission-mode");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "permission-mode.json"), JSON.stringify({ classifier: { failClosed: false } }));
+    await h.pi.emit("session_start", {}, h.ctx); // reload the config
+    h.ctx.answers.push("Allow once");
+    const res = await h.call("write", { path: "src/app.ts", content: "x" });
+    assert.equal(res, undefined); // the human allowed it
+    assert.equal(h.ctx.prompts.length, 1);
+    assert.ok(h.ctx.notices.some((n) => /asking instead/.test(n)));
+  } finally {
+    h.cleanup();
+  }
+});
+
+test("automode: allowed reads never reach the classifier", { skip }, async () => {
+  const registry = classifierRegistry(allowReply);
+  const h = await setup({ permFlag: "automode", modelRegistry: registry, model: { id: "m", provider: "p" } });
+  try {
+    const res = await h.call("read", { path: "src/app.ts" });
+    assert.equal(res, undefined);
+    assert.equal(registry.calls.length, 0); // the allow policy short-circuits
+  } finally {
+    h.cleanup();
+  }
+});
+
+test("/classifier-model persists the model and a bare call shows it", { skip }, async () => {
+  const h = await setup();
+  try {
+    await h.pi.commands.get("classifier-model")!("anthropic/claude-haiku-4-5", h.ctx);
+    const file = path.join(h.agentDir, "permission-mode", "permission-mode.json");
+    assert.equal((JSON.parse(readFileSync(file, "utf-8")) as { classifier: { model: string } }).classifier.model, "anthropic/claude-haiku-4-5");
+    h.ctx.notices.length = 0;
+    await h.pi.commands.get("classifier-model")!("", h.ctx);
+    assert.match(h.ctx.notices.at(-1) ?? "", /claude-haiku-4-5/);
+  } finally {
     h.cleanup();
   }
 });

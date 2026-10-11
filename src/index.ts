@@ -38,7 +38,7 @@
  *   show-plan.ts    show_plan tool   plan-render.ts  its renderer
  *
  * Install (see README.md):
- *   pi install git:github.com/wynainfo/pi-permission-modes
+ *   pi install git:github.com/qingshanblue/qings-pi-modes
  *   Linux also needs: bubblewrap, socat, ripgrep
  */
 
@@ -68,6 +68,7 @@ import {
   isUnsafeDomain,
   loadModeConfig,
   loadStockDefaults,
+  persistClassifierModel,
   persistModeDomains,
   persistModeRule,
   profileToConfig,
@@ -103,7 +104,33 @@ import {
   type Surface,
 } from "./schema.ts";
 import { createShowPlanTool } from "./show-plan.ts";
-import { updateStatus } from "./status.ts";
+import { updateStatus as renderStatus } from "./status.ts";
+import {
+  classifyAsk,
+  createDenialState,
+  normalizeClassifierConfig,
+  recordDenial,
+  recordSuccess,
+  resolveClassifierModel,
+  shouldFallbackToPrompting,
+  subjectKey,
+  VerdictCache,
+  type ClassifierRegistry,
+  type ClassifierSubject,
+  type DenialState,
+} from "./classifier.ts";
+
+/** What the AI classifier needs to judge a pending `ask` (see autoDecide). */
+interface AskReview {
+  /** Tool name as the model should see it (e.g. `bash`, or `skill:<name>`). */
+  tool: string;
+  /** The tool input payload (the classifier bounds it before sending). */
+  input: unknown;
+  /** True when the target lies outside the project. */
+  isOutside?: boolean;
+  /** True when approving would run bash UNSANDBOXED — never auto-approved. */
+  escalateToHuman?: boolean;
+}
 
 /** Built-in file tools whose `input.path` is gated against the matching surface. */
 const FILE_TOOL_SURFACE: Record<string, Surface> = {
@@ -169,6 +196,29 @@ export default async function (pi: ExtensionAPI) {
   const approvedUnsandboxed = new Set<string>();
   // "Allow for session" memory, keyed per-mode.
   const approvals = new SessionApprovals();
+  // AI safety classifier state (used by modes with `classifier: true`, e.g.
+  // automode): the consecutive-denial streak that falls back to the human
+  // prompt, and a bounded cache so an identical retried action skips the model.
+  let classifierDenials: DenialState = createDenialState();
+  const classifierCache = new VerdictCache();
+
+  /** Footer chip for the active mode when it uses the classifier. */
+  const classifierChip = (ctx: ExtensionContext, m: ModeDef): string | undefined => {
+    if (!m.classifier) return undefined;
+    const cfg = normalizeClassifierConfig(config.classifier);
+    if (!cfg.enabled) return "AI off";
+    const ref = cfg.model === "current" ? (ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "current") : cfg.model;
+    const short = ref.includes("/") ? ref.slice(ref.indexOf("/") + 1) : ref;
+    return `AI:${short}`;
+  };
+
+  /** Render the `perm` status chip, appending the classifier chip in AI modes. */
+  const updateStatus = (
+    ctx: ExtensionContext,
+    m: ModeDef,
+    sandboxState: Parameters<typeof renderStatus>[2],
+    networkOpen: boolean,
+  ): void => renderStatus(ctx, m, sandboxState, networkOpen, classifierChip(ctx, m));
   // One-step plan approval (plan-approval.ts): the plan show_plan rendered
   // last is offered for approval when the agent goes idle (A), confirmed on a
   // manual switch into the approve mode (B), and taken by /plan approve (C).
@@ -212,18 +262,98 @@ export default async function (pi: ExtensionAPI) {
     return "dismiss"; // dismissed prompt: deny this request, but don't remember
   };
 
+  /**
+   * Ask the AI classifier about a pending `ask`, falling back to the human
+   * prompt per its policy. Never lets the model authorize an unsandboxed run
+   * (`review.escalateToHuman`) — those always go to the human.
+   */
+  const autoDecide = async (
+    ctx: ExtensionContext,
+    surface: Surface,
+    target: string | string[],
+    title: string,
+    onForever: (() => void | Promise<void>) | undefined,
+    denyAnd: DenyOption | undefined,
+    review: AskReview,
+  ): Promise<boolean> => {
+    const humanPrompt = (): Promise<boolean> =>
+      askWithSession(
+        { hasUI: ctx.hasUI, select: (t, o) => ctx.ui.select(t, o) },
+        approvals,
+        modeName,
+        surface,
+        target,
+        title,
+        onForever,
+        denyAnd,
+      );
+    // Never let the model authorize an unsandboxed run — the human approves those.
+    if (review.escalateToHuman) return humanPrompt();
+    const cfg = normalizeClassifierConfig(config.classifier);
+    if (!cfg.enabled) return humanPrompt();
+    const targets = Array.isArray(target) ? target : [target];
+    const subject: ClassifierSubject = {
+      mode: modeName,
+      surface,
+      tool: review.tool,
+      targets,
+      input: review.input,
+      cwd: ctx.cwd ?? root,
+      isOutside: review.isOutside,
+    };
+    const key = subjectKey(subject, cfg.model);
+    let verdict = classifierCache.get(key);
+    try {
+      if (!verdict) {
+        verdict = await classifyAsk({
+          registry: ctx.modelRegistry as unknown as ClassifierRegistry,
+          model: resolveClassifierModel(ctx.modelRegistry, cfg.model, ctx.model),
+          config: cfg,
+          subject,
+          signal: ctx.signal,
+        });
+        classifierCache.set(key, verdict);
+      }
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      if (cfg.failClosed) {
+        if (ctx.hasUI) ctx.ui.notify(`permission-mode: classifier unavailable — ${reason}; blocking ${surface}`, "warning");
+        return false;
+      }
+      if (ctx.hasUI) ctx.ui.notify(`permission-mode: classifier unavailable — ${reason}; asking instead`, "warning");
+      return humanPrompt();
+    }
+    if (verdict.allow) {
+      classifierDenials = recordSuccess(classifierDenials);
+      return true;
+    }
+    classifierDenials = recordDenial(classifierDenials);
+    if (shouldFallbackToPrompting(classifierDenials, cfg.maxConsecutiveDenials)) {
+      if (ctx.hasUI) ctx.ui.notify("permission-mode: classifier denied repeatedly; asking you", "warning");
+      return humanPrompt();
+    }
+    if (ctx.hasUI) ctx.ui.notify(`permission-mode: auto blocked ${surface} (${verdict.reason})`, "warning");
+    return false;
+  };
+
   /** Prompt to allow an `ask`, honoring session grants (a target list requires
    * every entry to be granted; granting remembers all). Returns true to allow.
-   * When `onForever` is given, a fourth "Allow forever" option persists the rule. */
-  const promptAllow = (
+   * When `onForever` is given, a fourth "Allow forever" option persists the rule.
+   * In a classifier mode (`mode.classifier`), `review` routes the decision to
+   * the AI instead of the human. */
+  const promptAllow = async (
     ctx: ExtensionContext,
     surface: Surface,
     target: string | string[],
     title: string,
     onForever?: () => void | Promise<void>,
     denyAnd?: DenyOption,
-  ): Promise<boolean> =>
-    askWithSession(
+    review?: AskReview,
+  ): Promise<boolean> => {
+    if (review && currentMode().classifier) {
+      return autoDecide(ctx, surface, target, title, onForever, denyAnd, review);
+    }
+    return askWithSession(
       { hasUI: ctx.hasUI, select: (t, o) => ctx.ui.select(t, o) },
       approvals,
       modeName,
@@ -233,6 +363,7 @@ export default async function (pi: ExtensionAPI) {
       onForever,
       denyAnd,
     );
+  };
 
   /**
    * The "Deny and block … for this session" option for an escape prompt, or
@@ -338,6 +469,8 @@ export default async function (pi: ExtensionAPI) {
     const previous = modeName;
     modeName = name;
     fallbackMode = viaFallback;
+    classifierDenials = createDenialState(); // a fresh mode starts with a clean streak
+    classifierCache.clear();
     // Forward to child pi processes (e.g. subagents) via inherited env. The child
     // adopts it on session_start unless an explicit --perm flag overrides. The
     // implicit headless fallback is NOT forwarded: a child with no explicit mode
@@ -533,6 +666,33 @@ export default async function (pi: ExtensionAPI) {
       if (hasMode(config.modes, arg)) await setMode(arg, ctx);
       else if (arg === "") await cycle(ctx);
       else ctx.ui.notify(`permission-mode: unknown mode or subcommand "${arg}"; usage: /perm [${config.cycleOrder.join("|")}|init|clear-approvals|blocks|unblock <path>]`, "warning");
+    },
+  });
+  pi.registerCommand("classifier-model", {
+    description: "Show or switch the automode classifier model (current = follow the active session model)",
+    handler: async (args, ctx) => {
+      const arg = (args ?? "").trim();
+      const cfg = normalizeClassifierConfig(config.classifier);
+      const activeRef = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "no active model";
+      if (!arg) {
+        return ctx.ui.notify(
+          `permission-mode: classifier ${cfg.enabled ? "on" : "off"}; model: ${cfg.model === "current" ? `current (${activeRef})` : cfg.model}; usage: /classifier-model current | <provider/model>`,
+          "info",
+        );
+      }
+      if (arg !== "current" && !/^[^/\s]+\/\S+$/.test(arg)) {
+        return ctx.ui.notify(`permission-mode: "${arg}" is not "current" or a provider/model id`, "warning");
+      }
+      try {
+        const file = persistClassifierModel(getAgentDir(), arg);
+        config = loadModeConfig(ctx.cwd, getAgentDir(), (msg) => ctx.ui.notify(msg, "warning"));
+        classifierCache.clear(); // verdicts from the previous model must not survive
+        classifierDenials = createDenialState();
+        updateStatus(ctx, currentMode(), sandbox, net.open);
+        ctx.ui.notify(`permission-mode: classifier model → ${arg === "current" ? `current (${activeRef})` : arg} — saved to ${file}`, "info");
+      } catch (e) {
+        ctx.ui.notify(`permission-mode: could not save classifier model: ${e}`, "error");
+      }
     },
   });
   const networkEnforcing = () => sandbox.ready && networkFiltered(currentMode().sandbox);
@@ -938,7 +1098,7 @@ export default async function (pi: ExtensionAPI) {
     }
     if (
       action === "ask" &&
-      !(await promptAllow(ctx, "skill", name, `Skill "${name}" — first use in ${currentMode().label}; allow?`, learnForever(ctx, "skill", name)))
+      !(await promptAllow(ctx, "skill", name, `Skill "${name}" — first use in ${currentMode().label}; allow?`, learnForever(ctx, "skill", name), undefined, { tool: `skill:${name}`, input: { skill: name } }))
     ) {
       return { action: "handled" as const };
     }
@@ -985,7 +1145,13 @@ export default async function (pi: ExtensionAPI) {
         if (gate.kind === "block") return { block: true, reason: gate.reason };
         if (gate.kind === "prompt") {
           // Without an AST parse, scope a session grant to the exact command.
-          if (!(await promptAllow(ctx, "bash", command, gate.title))) {
+          if (
+            !(await promptAllow(ctx, "bash", command, gate.title, undefined, undefined, {
+              tool: "bash",
+              input: { command },
+              escalateToHuman: gate.onApproveUnsandboxed,
+            }))
+          ) {
             return { block: true, reason: gate.reason };
           }
           if (gate.onApproveUnsandboxed) approvedUnsandboxed.add(event.toolCallId);
@@ -1026,7 +1192,15 @@ export default async function (pi: ExtensionAPI) {
           : [];
         const hit = targets.map((t) => canonicalPath(root, t)).find((t) => blocked.covers(t));
         if (hit) return { block: true, reason: `Path ${displayPath(hit)} is blocked for this session (Deny and block); /perm unblock lifts it` };
-        if (!(await promptAllow(ctx, "bash", keys, gate.title, undefined, denyAndBlock(ctx, targets)))) return { block: true, reason: gate.reason };
+        if (
+          !(await promptAllow(ctx, "bash", keys, gate.title, undefined, denyAndBlock(ctx, targets), {
+            tool: "bash",
+            input: { command },
+            isOutside: Boolean(analysis.outsideReason),
+            escalateToHuman: gate.onApproveUnsandboxed,
+          }))
+        )
+          return { block: true, reason: gate.reason };
         if (gate.onApproveUnsandboxed) approvedUnsandboxed.add(event.toolCallId);
       }
       return undefined;
@@ -1055,7 +1229,7 @@ export default async function (pi: ExtensionAPI) {
         const title = outside ? `Outside project - allow ${toolName}? (${path})` : `Allow ${toolName}? (${path})`;
         const reason = outside ? "Access outside project blocked" : "blocked";
         const denyAnd = outside ? denyAndBlock(ctx, [path]) : undefined;
-        if (!(await promptAllow(ctx, surface, path, title, undefined, denyAnd))) return { block: true, reason };
+        if (!(await promptAllow(ctx, surface, path, title, undefined, denyAnd, { tool: toolName, input: { path }, isOutside: outside }))) return { block: true, reason };
       }
       return undefined; // allow
     }
@@ -1065,7 +1239,13 @@ export default async function (pi: ExtensionAPI) {
       const action = decide(m, "web_search", String(input.query ?? "(empty)"));
       if (action === "deny") return { block: true, reason: `web search blocked by ${m.label}` };
       // Session approval is surface-wide ("allow web search this session").
-      if (action === "ask" && !(await promptAllow(ctx, "web_search", "*", "Allow web search?"))) {
+      if (
+        action === "ask" &&
+        !(await promptAllow(ctx, "web_search", "*", "Allow web search?", undefined, undefined, {
+          tool: "web_search",
+          input: { query: String(input.query ?? "") },
+        }))
+      ) {
         return { block: true, reason: "web search blocked" };
       }
       return undefined;
@@ -1078,7 +1258,7 @@ export default async function (pi: ExtensionAPI) {
       if (action === "deny") return { block: true, reason: `Tool "${toolName}" blocked by ${m.label}` };
       if (
         action === "ask" &&
-        !(await promptAllow(ctx, "tool", toolName, `Tool "${toolName}" — first use in ${m.label}; allow?`, learnForever(ctx, "tool", toolName)))
+        !(await promptAllow(ctx, "tool", toolName, `Tool "${toolName}" — first use in ${m.label}; allow?`, learnForever(ctx, "tool", toolName), undefined, { tool: toolName, input }))
       ) {
         return { block: true, reason: "tool blocked" };
       }

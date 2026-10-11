@@ -5,8 +5,8 @@ Thanks for your interest in improving `permission-mode`!
 ## Dev setup
 
 ```bash
-git clone https://github.com/wynainfo/pi-permission-modes.git
-cd pi-permission-modes
+git clone https://github.com/qingshanblue/qings-pi-modes.git
+cd qings-pi-modes
 npm install            # installs @anthropic-ai/sandbox-runtime + dev tooling
 ```
 

@@ -93,7 +93,7 @@ test("shipped data: history parses, covers 2.0.0 to 2.2.1, differs from the curr
   const stale = auditStaleDefaults(oldCopy, current, history);
   assert.deepEqual(
     stale.map((f) => f.path).sort(),
-    ["build", "default", "plan"].flatMap((m) => [`modes.${m}.sandbox.allowWrite`, `modes.${m}.sandbox.denyRead`]).sort(),
+    ["cycleOrder", ...["build", "default", "plan"].flatMap((m) => [`modes.${m}.sandbox.allowWrite`, `modes.${m}.sandbox.denyRead`])].sort(),
   );
   // Ranges are reported per value: allowWrite changed in 2.3.0, denyRead in 2.4.0.
   assert.equal(stale.find((f) => f.path === "modes.build.sandbox.allowWrite")?.to, "2.2.1");

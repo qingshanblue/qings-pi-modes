@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/wynainfo/pi-permission-modes/main/schemas/permission-mode.schema.json",
+  "$id": "https://raw.githubusercontent.com/qingshanblue/qings-pi-modes/main/schemas/permission-mode.schema.json",
   "title": "permission-mode configuration",
   "description": "Declarative permission modes for the pi coding agent. Global config has full authority; project config (.pi/permission-mode.json) is tighten-only.",
   "type": "object",
@@ -36,6 +36,20 @@
       "properties": {
         "approveMode": { "type": "string", "description": "Mode to switch to when a plan is accepted. Default: build." },
         "approveMessage": { "type": "string", "description": "User message that starts the implementing turn; {path} is replaced by the plan path. Default: The plan in `{path}` is approved. Implement it now." }
+      }
+    },
+    "classifier": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "AI safety classifier (used by modes with `classifier: true`). Global config only; reviewer settings cannot be set by a project. The model defaults to the active session model.",
+      "properties": {
+        "enabled": { "type": "boolean", "description": "Master switch for the classifier (default true)." },
+        "model": { "type": "string", "description": "\"current\" (default) follows the active session model; otherwise a `provider/model` id resolved from the model registry." },
+        "timeoutMs": { "type": "integer", "minimum": 1, "description": "Per-call timeout in ms (default 15000)." },
+        "failClosed": { "type": "boolean", "description": "true (default): a classifier error blocks the action. false: fall back to the human prompt." },
+        "maxConsecutiveDenials": { "type": "integer", "minimum": 0, "description": "Offer the human prompt after this many consecutive denials (default 3; 0 disables)." },
+        "maxTokens": { "type": "integer", "minimum": 1, "description": "Answer budget per call (default 700)." },
+        "maxInputChars": { "type": "integer", "minimum": 1, "description": "Cap on the action payload sent to the model (default 4000)." }
       }
     }
   },
@@ -100,13 +114,14 @@
       "additionalProperties": false,
       "properties": {
         "label": { "type": "string", "description": "Footer label." },
-        "color": { "enum": ["muted", "mdLink", "accent", "error"], "description": "Footer label color." },
+        "color": { "enum": ["muted", "mdLink", "accent", "error", "warning"], "description": "Footer label color." },
         "systemPrompt": { "type": "string", "description": "System prompt to inject; '@plan' resolves to the dated Plan-mode prompt." },
         "injectSandboxInfo": { "type": "boolean", "description": "Inject the mode's sandbox boundaries (writable paths, denied reads, network allowlist) into the system prompt each turn (default true). Modes with sandbox.enabled:false never inject." },
         "sandbox": { "$ref": "#/$defs/sandbox" },
         "permission": { "$ref": "#/$defs/permission" },
         "hideTools": { "type": "array", "items": { "type": "string" }, "description": "Tools hidden from the model in this mode." },
-        "bypassProtectedPaths": { "type": "boolean", "description": "Skip the .git/.env/dotfile write backstop (only trusted modes)." }
+        "bypassProtectedPaths": { "type": "boolean", "description": "Skip the .git/.env/dotfile write backstop (only trusted modes)." },
+        "classifier": { "type": "boolean", "description": "Route this mode's `ask` decisions through the AI safety classifier instead of the human prompt (see the top-level `classifier` block)." }
       }
     }
   }

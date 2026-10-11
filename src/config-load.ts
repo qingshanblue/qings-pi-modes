@@ -24,6 +24,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PlanApprovalConfig } from "./plan-approval.ts";
+import type { ClassifierConfig } from "./classifier.ts";
 import {
   type Action,
   type ModeDef,
@@ -39,7 +40,7 @@ type OnError = (message: string) => void;
 const noop: OnError = () => {};
 
 /** `$schema` URL written into files this extension creates (/perm init, "Allow forever"). */
-export const SCHEMA_URL = "https://raw.githubusercontent.com/wynainfo/pi-permission-modes/main/schemas/permission-mode.schema.json";
+export const SCHEMA_URL = "https://raw.githubusercontent.com/qingshanblue/qings-pi-modes/main/schemas/permission-mode.schema.json";
 
 /** A project config larger than this is ignored (a FIFO or a giant file must not stall the loader). */
 const MAX_CONFIG_BYTES = 1 << 20;
@@ -71,7 +72,7 @@ export function hasMode(modes: Record<string, unknown>, name: unknown): name is 
 }
 
 const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
-const MODE_COLORS = new Set(["muted", "mdLink", "accent", "error"]);
+const MODE_COLORS = new Set(["muted", "mdLink", "accent", "error", "warning"]);
 
 /**
  * Keep only well-typed sandbox fields from a raw override, warning about the
@@ -321,6 +322,10 @@ function mergeGlobal(base: PermissionModeConfig, over: Partial<PermissionModeCon
     const m: Partial<ModeDef> = { ...(raw as Partial<ModeDef>) };
     if (raw.permission !== undefined) m.permission = cleanPermission(raw.permission, where, onError) as ModeDef["permission"];
     if (raw.sandbox !== undefined) m.sandbox = sanitizeSandbox(raw.sandbox, where, onError) as SandboxProfile;
+    if (raw.classifier !== undefined && typeof raw.classifier !== "boolean") {
+      onError(`permission-mode: ignoring classifier in ${where}: must be a boolean`);
+      delete m.classifier;
+    }
     if (raw.hideTools !== undefined && !isStringArray(raw.hideTools)) {
       onError(`permission-mode: ignoring hideTools in ${where}: must be a string array`);
       delete m.hideTools;
@@ -356,7 +361,54 @@ function mergeGlobal(base: PermissionModeConfig, over: Partial<PermissionModeCon
   let defaultMode = typeof over.defaultMode === "string" ? over.defaultMode : base.defaultMode;
   if (!hasMode(modes, defaultMode)) defaultMode = cycleOrder[0] ?? base.defaultMode;
   const plan = sanitizePlan(over.plan, onError) ?? base.plan;
-  return { defaultMode, cycleOrder, modes, ...(plan ? { plan } : {}) };
+  const classifier = sanitizeClassifier(over.classifier, onError);
+  const mergedClassifier = classifier ? { ...(base.classifier ?? {}), ...classifier } : base.classifier;
+  return {
+    defaultMode,
+    cycleOrder,
+    modes,
+    ...(plan ? { plan } : {}),
+    ...(mergedClassifier ? { classifier: mergedClassifier } : {}),
+  };
+}
+
+/** The allowed top-level `classifier` keys. */
+const CLASSIFIER_KEYS = new Set(["enabled", "model", "timeoutMs", "failClosed", "maxConsecutiveDenials", "maxTokens", "maxInputChars"]);
+
+/** Validate the top-level `classifier` block; only present, well-typed keys survive (shallow patch). */
+function sanitizeClassifier(raw: unknown, onError: OnError): Partial<ClassifierConfig> | undefined {
+  if (raw === undefined) return undefined;
+  if (!isPlainObject(raw)) {
+    onError("permission-mode: global config: classifier must be an object; ignoring");
+    return undefined;
+  }
+  const out: Partial<ClassifierConfig> = {};
+  for (const [k, v] of safeEntries(raw)) {
+    switch (k) {
+      case "enabled":
+      case "failClosed":
+        if (typeof v === "boolean") out[k] = v;
+        else onError(`permission-mode: ignoring classifier.${k}: must be a boolean`);
+        break;
+      case "model":
+        if (typeof v === "string" && v.trim()) out.model = v.trim();
+        else onError("permission-mode: ignoring classifier.model: must be a non-empty string");
+        break;
+      case "timeoutMs":
+      case "maxTokens":
+      case "maxInputChars":
+        if (typeof v === "number" && Number.isFinite(v) && v > 0) out[k] = Math.floor(v);
+        else onError(`permission-mode: ignoring classifier.${k}: must be a positive number`);
+        break;
+      case "maxConsecutiveDenials":
+        if (typeof v === "number" && Number.isFinite(v) && v >= 0) out.maxConsecutiveDenials = Math.floor(v);
+        else onError("permission-mode: ignoring classifier.maxConsecutiveDenials: must be a number >= 0");
+        break;
+      default:
+        onError(`permission-mode: ignoring unknown classifier field "${k}"`);
+    }
+  }
+  return out;
 }
 
 /** The top-level `plan` block: string fields only, anything else dropped with a warning. */
@@ -429,6 +481,9 @@ function applyProject(config: PermissionModeConfig, project: unknown, onError: O
   if (project.plan !== undefined) {
     onError("permission-mode: project config cannot set plan (approval settings are global); ignoring");
   }
+  if (project.classifier !== undefined) {
+    onError("permission-mode: project config cannot set classifier (reviewer settings are global); ignoring");
+  }
   if (project.modes !== undefined && !isPlainObject(project.modes)) {
     onError("permission-mode: project config modes must be an object; ignoring");
     return;
@@ -446,6 +501,9 @@ function applyProject(config: PermissionModeConfig, project: unknown, onError: O
         continue;
       }
       if (raw.sandbox !== undefined) base.sandbox = tightenSandbox(base.sandbox, raw.sandbox, where, onError);
+      if (raw.classifier !== undefined) {
+        onError(`permission-mode: project config cannot set classifier for mode "${name}"; ignoring`);
+      }
       if (raw.permission !== undefined) {
         // Attach as a most-restrictive overlay - provably tighten-only.
         base.projectOverlay = cleanPermission(raw.permission, where, onError) as ModeDef["permission"];
@@ -646,6 +704,22 @@ export function persistModeRule(
   map[key] = action;
   permission[surface] = map;
 
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`);
+  return file;
+}
+
+/**
+ * Persist the automode classifier model to the global config's top-level
+ * `classifier.model` (`"current"` = follow the active session model). Global
+ * only: a project must not be able to point the reviewer at a weaker model.
+ * Returns the path written.
+ */
+export function persistClassifierModel(agentDir: string, model: string): string {
+  const file = globalConfigFile(agentDir);
+  const data = readGlobalForWrite(file);
+  const classifier = (data.classifier ??= {}) as Record<string, unknown>;
+  classifier.model = model;
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`);
   return file;

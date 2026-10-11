@@ -50,13 +50,13 @@ function sandbox(opts: { global?: unknown; project?: unknown } = {}): {
   return { cwd, agentDir, errors, cleanup: () => rmSync(tmp, { recursive: true, force: true }) };
 }
 
-test("loadStockDefaults: reads the shipped JSON → four modes, correct defaults", () => {
+test("loadStockDefaults: reads the shipped JSON → five modes, correct defaults", () => {
   const errors: string[] = [];
   const c = loadStockDefaults((m) => errors.push(m));
   assert.equal(errors.length, 0, errors.join("; ")); // stock file present & valid
   assert.equal(c.defaultMode, "default");
-  assert.deepEqual(c.cycleOrder, ["default", "plan", "build", "yolo"]);
-  assert.deepEqual(Object.keys(c.modes).sort(), ["build", "default", "plan", "yolo"]);
+  assert.deepEqual(c.cycleOrder, ["default", "plan", "build", "automode", "yolo"]);
+  assert.deepEqual(Object.keys(c.modes).sort(), ["automode", "build", "default", "plan", "yolo"]);
   assert.ok(stockDefaultsFile().endsWith("permission-mode.defaults.json"));
 });
 
@@ -69,11 +69,11 @@ test("FALLBACK_CONFIG is a valid, safe single-mode config", () => {
   assert.equal(decide(d, "write", "x.ts"), "ask");
 });
 
-test("loadModeConfig: no files → the four built-in modes", () => {
+test("loadModeConfig: no files → the five built-in modes", () => {
   const s = sandbox();
   const c = loadModeConfig(s.cwd, s.agentDir, (m) => s.errors.push(m));
   assert.equal(c.defaultMode, "default");
-  assert.deepEqual(Object.keys(c.modes).sort(), ["build", "default", "plan", "yolo"]);
+  assert.deepEqual(Object.keys(c.modes).sort(), ["automode", "build", "default", "plan", "yolo"]);
   assert.equal(s.errors.length, 0);
   s.cleanup();
 });
@@ -226,7 +226,7 @@ test("project: cannot add a mode or change defaults", () => {
 test("malformed JSON keeps prior layer and reports the error", () => {
   const s = sandbox({ global: "{ not valid json " });
   const c = loadModeConfig(s.cwd, s.agentDir, (m) => s.errors.push(m));
-  assert.deepEqual(Object.keys(c.modes).sort(), ["build", "default", "plan", "yolo"]); // defaults intact
+  assert.deepEqual(Object.keys(c.modes).sort(), ["automode", "build", "default", "plan", "yolo"]); // defaults intact
   assert.ok(s.errors.some((e) => /could not parse/.test(e)));
   s.cleanup();
 });
@@ -281,7 +281,7 @@ test("profileToConfig output validates against the runtime's SandboxRuntimeConfi
     assert.doesNotThrow(() => runtimeSchema!.parse(readOnlyOverride(cfg, ["/tmp/pi/s1"])));
     checked.push(name);
   }
-  assert.deepEqual(checked, ["default", "plan", "build"]);
+  assert.deepEqual(checked, ["default", "plan", "build", "automode"]);
   // The README's strict-home shape (denyRead "~" with allowRead carve-outs) validates as well.
   const strict = profileToConfig({ ...stock.modes.build.sandbox, denyRead: ["~"], allowRead: [".", "/tmp/pi", "~/.cache"] });
   assert.doesNotThrow(() => runtimeSchema!.parse({ network: strict.network, filesystem: strict.filesystem }));
@@ -505,4 +505,33 @@ test("plan config: global strings are kept, wrong types and unknown keys warn, p
   const none = sandbox({});
   assert.equal(loadModeConfig(none.cwd, none.agentDir).plan, undefined);
   none.cleanup();
+});
+
+test("classifier: the global block is validated and mode.classifier must be a boolean", () => {
+  const s = sandbox({
+    global: {
+      classifier: { model: "anthropic/claude-haiku-4-5", timeoutMs: 2000, failClosed: false, maxConsecutiveDenials: 0, bogus: 1 },
+      modes: { build: { classifier: "yes" } },
+    },
+  });
+  const c = loadModeConfig(s.cwd, s.agentDir, (m) => s.errors.push(m));
+  assert.equal(c.classifier?.model, "anthropic/claude-haiku-4-5");
+  assert.equal(c.classifier?.timeoutMs, 2000);
+  assert.equal(c.classifier?.failClosed, false);
+  assert.equal(c.classifier?.maxConsecutiveDenials, 0);
+  assert.ok(!("bogus" in (c.classifier ?? {})), "unknown classifier keys are dropped");
+  assert.ok(s.errors.some((e) => /unknown classifier field "bogus"/.test(e)));
+  assert.equal(c.modes.build.classifier, undefined, "a non-boolean mode.classifier is dropped");
+  assert.ok(s.errors.some((e) => /ignoring classifier in global mode "build"/.test(e)));
+  s.cleanup();
+});
+
+test("classifier: a project config cannot set it (global-only reviewer settings)", () => {
+  const s = sandbox({ project: { classifier: { model: "evil/weak" }, modes: { build: { classifier: true } } } });
+  const c = loadModeConfig(s.cwd, s.agentDir, (m) => s.errors.push(m));
+  assert.equal(c.classifier, undefined);
+  assert.equal(c.modes.build.classifier, undefined);
+  assert.ok(s.errors.some((e) => /project config cannot set classifier/.test(e)));
+  assert.ok(s.errors.some((e) => /cannot set classifier for mode "build"/.test(e)));
+  s.cleanup();
 });

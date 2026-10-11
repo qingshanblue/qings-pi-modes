@@ -13,6 +13,7 @@
  */
 
 import type { PlanApprovalConfig } from "./plan-approval.ts";
+import type { ClassifierConfig } from "./classifier.ts";
 
 /** Three-state permission outcome (opencode-compatible semantics). */
 export type Action = "allow" | "ask" | "deny";
@@ -69,7 +70,7 @@ export const SURFACES: Surface[] = [
 export const FILE_SURFACES: Surface[] = ["read", "write", "edit", "grep", "find", "ls", "bash"];
 
 /** Footer label colors (semantic theme tokens, no icons). */
-export type ModeColor = "muted" | "mdLink" | "accent" | "error";
+export type ModeColor = "muted" | "mdLink" | "accent" | "error" | "warning";
 
 /**
  * The OS-sandbox profile for a mode. `enabled:false` runs bash unsandboxed
@@ -127,6 +128,13 @@ export interface ModeDef {
    */
   bypassProtectedPaths?: boolean;
   /**
+   * Route this mode's `ask` decisions through the AI safety classifier instead
+   * of the human prompt (see `classifier.ts`). The model, timeout and
+   * fail-closed policy come from the top-level `classifier` config block. The
+   * shipped `automode` is the only built-in that sets it.
+   */
+  classifier?: boolean;
+  /**
    * Internal (NOT part of the JSON schema): a project config's tighten-only
    * permission overlay, set by the loader. The resolver folds it in as an extra
    * most-restrictive layer, so it can only tighten the base policy, never loosen
@@ -144,6 +152,11 @@ export interface PermissionModeConfig {
   modes: Record<string, ModeDef>;
   /** One-step plan approval settings (plan-approval.ts). Global config only. */
   plan?: PlanApprovalConfig;
+  /**
+   * AI safety classifier settings (classifier.ts). Global config only — a
+   * project must not be able to point the reviewer at a weaker model.
+   */
+  classifier?: Partial<ClassifierConfig>;
 }
 
 /** Sentinel a mode's `systemPrompt` can use to request the Plan-mode prompt. */

@@ -6,6 +6,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **`automode` — an AI safety classifier mode (the fifth built-in).** A mode
+  with `"classifier": true` routes its `ask` decisions to an LLM instead of the
+  human prompt. `automode` ships sandboxed with reads free and
+  writes/bash/out-of-project/web_search/extension tools routed to the reviewer.
+  The classifier runs in-process via `ctx.modelRegistry.complete()` (pi's own
+  request-time auth), defaults to the **active session model** (`"current"`),
+  and is single-attempt with a hard timeout. It is fail-closed (errors block),
+  never auto-approves an unsandboxed run, and falls back to a human prompt after
+  `maxConsecutiveDenials` (default 3).
+- **`/classifier-model [current | <provider/model>]`** — show or switch the
+  automode classifier model; persisted to the global config's `classifier.model`.
+- Top-level `classifier` config block (`enabled`, `model`, `timeoutMs`,
+  `failClosed`, `maxConsecutiveDenials`, `maxTokens`, `maxInputChars`) and a
+  per-mode `classifier` boolean. Global-only: a project config cannot set them.
+- The footer shows the reviewer in classifier modes (e.g. `AI:claude-haiku-4-5`).
+- `automode` joins the `alt+m` cycle: `default → plan → build → automode → yolo`.
+
 ## [2.4.1]
 
 ### Security

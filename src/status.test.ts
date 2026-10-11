@@ -30,3 +30,13 @@ test("updateStatus: filtered / open / unrestricted / degraded", () => {
   updateStatus(c as never, mode({ enabled: true, writable: true, network: { allowedDomains: ["a.com"] } }), { ready: false, warn: "sandbox init failed", disabled: false }, false);
   assert.equal(c.status, "Build (alt+m) (!) sandbox init failed  Network: open");
 });
+
+test("updateStatus: the classifier chip only appears in classifier modes", () => {
+  const ready = { ready: true, warn: undefined, disabled: false };
+  let c = ctx();
+  updateStatus(c as never, { ...mode({ enabled: true, writable: true }), classifier: true }, ready, false, "AI:m");
+  assert.match(c.status, /AI:m/);
+  c = ctx();
+  updateStatus(c as never, mode({ enabled: true, writable: true }), ready, false, "AI:m");
+  assert.ok(!/AI:m/.test(c.status), "no chip outside classifier modes");
+});

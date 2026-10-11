@@ -1,17 +1,17 @@
 {
-  "name": "pi-permission-modes",
+  "name": "qings-pi-modes",
   "version": "2.4.1",
   "type": "module",
   "description": "Declarative, user-definable permission modes for the pi coding agent: OS-level sandboxing (bubblewrap / sandbox-exec), an allow/ask/deny policy engine, real bash AST gating (tree-sitter), tool hiding, and skill/custom-tool gating.",
   "license": "MIT",
   "author": "Nico Merz <nico.merz@wyna-informatik.ch>",
-  "homepage": "https://github.com/wynainfo/pi-permission-modes#readme",
+  "homepage": "https://github.com/qingshanblue/qings-pi-modes#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/wynainfo/pi-permission-modes.git"
+    "url": "git+https://github.com/qingshanblue/qings-pi-modes.git"
   },
   "bugs": {
-    "url": "https://github.com/wynainfo/pi-permission-modes/issues"
+    "url": "https://github.com/qingshanblue/qings-pi-modes/issues"
   },
   "keywords": [
     "pi",
