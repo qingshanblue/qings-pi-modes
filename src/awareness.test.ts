@@ -58,13 +58,14 @@ test("background processes: the teardown caveat is stated when the sandbox is ac
   assert.doesNotMatch(sandboxAwarenessPrompt(mode(), { active: false, reason: "x" }) ?? "", /outlive/);
 });
 
-test("read-only mode: says READ-ONLY instead of listing writable paths", () => {
-  const out = sandboxAwarenessPrompt(mode({ label: "Plan Mode" }, { writable: false }), { active: true });
+test("strict state: says SANDBOX STRICT — outside blocked for read and write", () => {
+  const out = sandboxAwarenessPrompt(mode({ label: "Plan Mode" }), { active: true, strict: true });
   assert.ok(out);
   assert.match(out, /\(Plan Mode\)/);
-  assert.match(out, /READ-ONLY/);
-  assert.match(out, /Write\/Edit tools/);
-  assert.doesNotMatch(out, /Writable paths:/);
+  assert.match(out, /SANDBOX STRICT/);
+  assert.match(out, /BLOCKED for read and write/);
+  // Inside the boundary things work normally: writable paths are still listed.
+  assert.match(out, /Writable paths:/);
 });
 
 test("empty network allowlist: says nothing is allowlisted, still offers the ask flow", () => {
@@ -142,9 +143,6 @@ test("scratch dir: its own bullet in a writable sandboxed mode, listed once, men
   // Degraded: the short note still names the scratch dir (bounds still apply, no prompt there).
   const degraded = sandboxAwarenessPrompt(mode(), { active: false, reason: "x", scratchDir: dir });
   assert.match(degraded ?? "", /scratch directory: \/tmp\/pi\/sess-1/);
-  // Read-only bash (Plan): nothing can be written there from bash, so it isn't advertised.
-  const ro = sandboxAwarenessPrompt(mode({ label: "Plan Mode" }, { writable: false }), { active: true, scratchDir: dir });
-  assert.doesNotMatch(ro ?? "", /scratch directory/);
 });
 
 test("injectSandboxInfo:false opts out entirely", () => {

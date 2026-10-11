@@ -2,7 +2,7 @@
 
 > Qing's permission modes for [pi](https://pi.dev) - a fork of
 > [wynainfo/pi-permission-modes](https://github.com/wynainfo/pi-permission-modes)
-> that adds an AI **`automode`** (classifier-reviewed permissions).
+> that adds an AI **`auto`** mode (classifier-reviewed permissions).
 
 [![CI](https://github.com/qingshanblue/qings-pi-modes/actions/workflows/ci.yml/badge.svg)](https://github.com/qingshanblue/qings-pi-modes/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -13,7 +13,7 @@ coding agent. Each mode is a JSON bundle of an **OS-level sandbox profile**
 surface (bash, file tools, the project boundary, web search, extension tools,
 skills). Bash gating uses a real **tree-sitter** AST, not a regex.
 
-Five modes ship by default - **Default → Plan Mode → Build → Auto → YOLO** - and
+Five modes ship by default - **Plan → Ask → Edits → Auto → Accept** - and
 you can retune them or add your own in `permission-mode.json`.
 
 See [SECURITY.md](SECURITY.md) for the threat model,
@@ -79,39 +79,62 @@ On **macOS** the sandbox uses the built-in `sandbox-exec` - no extra packages.
 
 ### Verify
 
-1. Start pi in any project - the footer shows a mode indicator, e.g. `Default`.
-2. Switch to Build (`alt+m` until `Build`, or `/perm build`):
-   - sandbox active → `Build (sandboxed in project dir)`;
-   - otherwise → `Build (!) sandbox-runtime missing ...` plus a fix-it notification.
+1. Start pi in any project - the footer shows a mode indicator, e.g. `Ask`.
+2. Switch to Edits (`ctrl+q` until `Edits`, or `/perm edits`):
+   - sandbox active → `Edits (sandboxed in project dir)`;
+   - otherwise → `Edits (!) sandbox-runtime missing ...` plus a fix-it notification.
 3. `/sandbox` prints the active sandbox configuration (or why it's unavailable).
 
 ---
 
 ## Modes
 
-Cycle with **`alt+m`** or set directly with **`/perm <mode>`**. The current mode
+Cycle with **`ctrl+q`** (or `alt+m`) or set directly with **`/perm <mode>**`. The current mode
 is persisted per session (survives `/reload`, resume, and branch navigation) and
 shown in the footer.
 
-Default, Plan Mode, Build, and Auto all run in-project `bash` inside the OS
+Ask, Plan Mode, Edits, and Auto all run in-project `bash` inside the OS
 sandbox.
-The footer always shows the mode, the network state, and their shortcuts -
-e.g. `Build (sandboxed in project dir, alt+m)  Network: filtered (alt+n)` -
-with the network chip green while the domain allowlist filters and orange when
-open (see [Network](#network)). Only YOLO is unsandboxed. Labels are plain text
-(no icons); `alt+m` cycles in the order below. The table describes the **shipped defaults** - every mode is data and can
-be retuned, and you can add your own, in `permission-mode.json` (see
-[Configuration](#configuration)).
+The footer shows a **compact** status by default - the mode label plus readable
+machine-state tokens, e.g. `Auto · sandbox:on · net:filtered · AI:haiku`
+(`sandbox:on` project-writable / `sandbox:strict` outside blocked for read and write / `sandbox:off` /
+`sandbox:unavailable`; `net:filtered` / `net:open` only while the sandbox
+enforces an allowlist; `AI:<model>` only in the `auto` mode). Set
+`"statusFormat": "verbose"` in the global config for the spelled-out form
+(`Edits (sandboxed in project dir, ctrl+q)  Network: filtered (ctrl+n)`). The
+network token is green while the domain allowlist filters and orange when open
+(see [Network](#network)). Accept is decoupled from the sandbox too: `ctrl+s`
+decides whether it runs sandboxed. The label texts are plain; `ctrl+q` cycles in
+the order below. The table describes the **shipped defaults** - every mode is
+data and can be retuned, and you can add your own, in `permission-mode.json`
+(see [Configuration](#configuration)).
 
 | Mode | Behavior |
 |------|----------|
-| **Default** | Confirm every `bash`/`edit`/`write`; reads are free. Approved **in-project** `bash` runs **sandboxed** (writes confined to the project). |
-| **Plan Mode** | Planning mode. Reads are free; in-project `bash` runs **sandboxed read-only** (writes/deletes fail), so only read commands effectively work. The one mutation allowed without confirmation is **creating/editing Markdown** (`*.md`/`*.markdown`) inside the project - other `edit`/`write` are blocked. A system-prompt addition steers the model: for a planning task, write the plan to `plan/<YYYY-MM-DD>_<description>.md`, render it for review with the **`show_plan`** tool, then hand over to you: an **Accept / Decline** prompt follows the plan (see [Approving a plan](#approving-a-plan)). |
-| **Build** | Reads, writes, and `bash` **inside the project** run with no confirmation; in-project `bash` runs **sandboxed**. |
+| **Ask** | Confirm every `bash`/`edit`/`write`; reads are free. Approved **in-project** `bash` runs **sandboxed** (writes confined to the project). A read-only command on the whitelist runs without a prompt. |
+| **Plan Mode** | Planning mode. Reads are free; only **Markdown** (`*.md`/`*.markdown`) can be created or **edited** inside the project - other `edit`/`write` are blocked. Mutating `bash` is **asked** (read-only commands on the whitelist run without a prompt). A system-prompt addition steers the model: for a planning task, write the plan to `plan/<YYYY-MM-DD>_<description>.md`, render it for review with the **`show_plan`** tool, then hand over to you: an **Accept / Decline** prompt follows the plan (see [Approving a plan](#approving-a-plan)). |
+| **Edits** | Project-internal `edit`/`write` run with no confirmation (like Claude Code's accept-edits); `bash` still asks. In-project `bash` runs **sandboxed**. |
 | **Auto** | Reads are free; `bash`/`edit`/`write`, out-of-project access, web search, and extension tools are judged by the **AI safety classifier** instead of prompting you (see [AI automode](#ai-automode)). Runs **sandboxed**; an action that would run unsandboxed (an escape, privilege escalation, or a degraded sandbox) still goes to a human. |
-| **YOLO** | Never prompts, never sandboxes, no protected-path backstop. Can do anything the current user can. |
+| **Accept** | Never prompts (auto-accepts every policy decision) — but it is **still bounded by the sandbox**: `ctrl+s` decides what it can reach. No protected-path backstop. |
 
-In every mode except YOLO: **out-of-project** access prompts; `bash` that
+The **OS sandbox is decoupled from the mode and has one job: the project
+boundary.** `ctrl+q` picks the approval mode; `ctrl+s` cycles the **sandbox
+state** `off → on → strict` (`/sandbox off|on|strict` sets it, `/sandbox` shows
+the detail):
+
+- **off** — no OS confinement: outside paths are readable and writable.
+- **on** (default) — outside **writes** are blocked at the OS level; outside
+  reads are allowed (secret paths are masked); the project works normally.
+- **strict** — outside paths are blocked for **read and write** at the policy
+  layer (the OS cannot mask system reads without breaking the shell, so the
+  dispatcher rejects any out-of-project access outright).
+
+A mode may **pin** a state with `sandboxPin`; a pin overrides `ctrl+s` while the
+mode is active and the session state is restored when you leave it. The state is
+session-scoped and forwarded to subagents (`PI_PERMISSION_SANDBOX`); a headless
+child with no forwarded state defaults to `on`.
+
+In every mode except Accept: **out-of-project** access prompts; `bash` that
 reaches outside the project or **escalates privileges**
 (`su`/`sudo`/`doas`/`pkexec`/`runuser`/`setpriv`/`chroot` - detected even
 through wrappers like `env`/`nice`/`xargs` and `bash -c '…'` scripts) prompts,
@@ -127,7 +150,7 @@ project intends, and the sandbox still governs what it may touch. Symlinks to
 outside directories or non-executable files stay escapes.
 
 > **When the sandbox is unavailable** (missing dependency, init failure,
-> unsupported platform, `--no-sandbox`): Default/Plan/Build show
+> unsupported platform, `--no-sandbox`): Ask/Plan/Edits show
 > `(!) <reason>` in the footer, and in-project `bash` that would have been
 > sandboxed instead **prompts** for confirmation - you are never silently
 > unprotected.
@@ -150,7 +173,7 @@ outside directories or non-executable files stay escapes.
 > `.bashrc`/`.zshrc`/… shell rc files, `.ripgreprc`, `.mcp.json`, `.vscode`,
 > `.idea`, `.claude/{commands,agents}`). When one of these is **absent**, it
 > blocks the path by mounting `/dev/null` over the first missing component, and
-> because the project is writable in Default/Build, bubblewrap materializes that
+> because the project is writable in Ask/Edits, bubblewrap materializes that
 > mountpoint as a **0-byte, read-only file**. The runtime removes these mount
 > points once no sandboxed command is running any more, and re-covers
 > leftovers of a crashed session on its next run. (Up to 2.3.1 the extension
@@ -186,13 +209,13 @@ appears:
 
 ```
 Plan ready: plan/2026-09-24_feature.md
-  > Accept: switch to Build and implement it
+  > Accept: switch to Edits and implement it
     Decline: keep refining in Plan Mode
 ```
 
-- **Accept** switches to the approve mode (Build by default) and sends a
+- **Accept** switches to the approve mode (Edits by default) and sends a
   real user message, `The plan in \`plan/...\` is approved. Implement it
-  now.`, so the implementing turn starts under Build's system prompt, never
+  now.`, so the implementing turn starts under Edits's system prompt, never
   under the Plan prompt still in effect. The message is visible in the
   transcript like anything you type.
 - Approval covers what you saw: if the plan file changes after it was
@@ -203,8 +226,8 @@ Plan ready: plan/2026-09-24_feature.md
 
 Two fallbacks cover the other ways in:
 
-- Switching into the approve mode by hand (`alt+m`, `/perm build`) while a
-  plan is pending asks `Implement plan/... now?`; No leaves you in Build with
+- Switching into the approve mode by hand (`alt+m`, `/perm edits`) while a
+  plan is pending asks `Implement plan/... now?`; No leaves you in Edits with
   nothing sent.
 - **`/plan approve`** switches and sends without asking; **`/plan status`**
   names the pending plan.
@@ -238,9 +261,10 @@ stays truthful. `/sandbox` shows the path.
 Sandbox-wise, all pi sessions on the host share the `/tmp/pi` base (it is in
 the shipped `allowWrite`; the base is created sticky and world-writable like
 `/tmp`, each session folder is `0700`). Instruction-wise, each session is told
-to use only its own folder - including YOLO, which is otherwise unsandboxed but
-still gets a short "scratch directory" pointer. Plan mode's read-only bash can't
-write there (like everywhere else), so it isn't advertised there.
+to use only its own folder - including Accept, which never prompts but still
+gets a short "scratch directory" pointer. Plan mode gates mutating bash, so it
+can't write there from bash (like everywhere else) - but the pointer is still
+advertised, because the Write/Edit tools may use it.
 
 Nothing is deleted at shutdown - `/reload` and session resume find their files
 again (the folder is keyed on pi's session id). Instead, at every session start,
@@ -255,10 +279,10 @@ allowlist** (package registries + GitHub by default). This is no longer a silent
 wall - a request to a host outside the allowlist **pauses while you're asked**
 (*Allow for session / Allow forever / Deny*), then proceeds or fails:
 
-- **`alt+n`** toggles filtering for the session: `Network: filtered` (green) ⇄
+- **`ctrl+n`** (or `alt+n`) toggles filtering for the session: `Network: filtered` (green) ⇄
   `Network: open` (orange) in the footer, which always shows the shortcut.
 - **`/net`** - `status` (allowlist, session grants/denies), `allow <domain…>`
-  (grant for the session), `open` / `restrict` (same as `alt+n`), `reset`
+  (grant for the session), `open` / `restrict` (same as `ctrl+n`), `reset`
   (forget session grants/denies).
 - The model has a **`request_network_access`** tool: it names the domains and a
   reason, you approve or deny - one prompt can cover several domains (e.g. all
@@ -288,6 +312,10 @@ is the only shipped mode with `"classifier": true`.
 - It only reviews actions whose policy resolves to **`ask`**. `allow` actions run
   untouched (reads are never sent to the model) and `deny` actions are blocked
   before the classifier sees them.
+- **Tier 1 whitelist:** a known read-only bash command (`ls`, `cat`, `grep`,
+  `git status`, …) with no redirect or command substitution passes **without a
+  model call**. `ask` and `edits` share this whitelist, so a read-only command
+  never nags there either. An escape never qualifies.
 - **Safety boundary:** an action that would run bash **unsandboxed** (an
   out-of-project escape, privilege escalation, or a degraded sandbox) is never
   auto-approved - it always goes to the human prompt.
@@ -297,7 +325,7 @@ is the only shipped mode with `"classifier": true`.
 - After `classifier.maxConsecutiveDenials` consecutive denials (default 3) it
   offers the human prompt once, so you are not stuck.
 - The footer shows the reviewer, e.g.
-  `Auto (alt+m)  Network: open  AI:claude-haiku-4-5`.
+  `Auto · sandbox:on · net:filtered · AI:claude-haiku-4-5`.
 
 Configure the reviewer in the global `permission-mode.json`:
 
@@ -374,9 +402,9 @@ Two independent layers compose:
    `sandbox-exec` (macOS) / `bubblewrap` (Linux), confining **writes** to the
    profile's `allowWrite` (project + `/tmp/pi` + the session's scratch directory
    by default) and denying reads of the
-   profile's `denyRead` secrets - regardless of what the command does. A mode with
-   `sandbox.writable:false` (Plan) runs bash **read-only**; `sandbox.enabled:false`
-   (YOLO) runs it unsandboxed.
+   profile's `denyRead` secrets - regardless of what the command does. Plan pins
+   sandbox to `on`/`strict`; the session's `ctrl+s`
+   state decides whether the other modes run sandboxed (`off` = bash unsandboxed).
 
 So a `bash` command that policy says `allow` still runs **sandboxed**; `ask`
 prompts, then runs sandboxed - or **unsandboxed** for an out-of-project escape
@@ -386,7 +414,7 @@ or privilege escalation you approve, since you authorized it; `deny` never runs.
 > `write`/…) are governed by the policy engine and the path checks, not bubblewrap -
 > which is why the Plan-mode Markdown-only rule and the protected-path backstop
 > are enforced at the tool layer. Reads inside the sandbox stay broad (only
-> `denyRead` secrets are blocked at the kernel), and a non-sandboxing mode (YOLO)
+> `denyRead` secrets are blocked at the kernel), and a non-sandboxing mode (sandbox `off`)
 > confines nothing. [SECURITY.md](SECURITY.md) has the full threat model.
 
 **Sandbox awareness.** While a sandboxed mode is active, a factual
@@ -397,7 +425,7 @@ paths and domains that actually work - project-local installs instead of `~/.npm
 allowlisted hosts instead of dead fetches - and knows a boundary-crossing command
 is fine to issue because you'll simply be asked. When the sandbox is degraded, the
 section says so and points at the confirmation prompts instead. Opt a mode out
-with `"injectSandboxInfo": false`; unsandboxed modes (YOLO) never inject.
+with `"injectSandboxInfo": false`; modes with the sandbox `off` never inject.
 
 **Tool hiding.** A mode's `hideTools` list removes those tools from the model
 *before* it reasons (via the active-tools allowlist), so it never attempts them.
@@ -410,22 +438,22 @@ that prompt tells the model to call it.
 
 **Skills & extension tools.** Skills are gated by name at `/skill:<name>` (the
 `skill` surface); any non-builtin/extension tool (including MCP-as-tool in a host
-that adds them) is gated by tool name (the `tool` surface). In **Default** and
+that adds them) is gated by tool name (the `tool` surface). In **Ask** and
 **Plan**, a tool/skill the host adds that has no rule yet **prompts on first use** -
 *Allow once / Allow this session / Allow forever / Deny*. "Allow forever"
 persists `<mode>.permission.<tool|skill>.<name>: "allow"` to your global config so
-it never asks again. **Build** and **YOLO** allow all tools/skills without
+it never asks again. **Accept** allows all tools/skills without
 prompting. (Set a mode's `tool`/`skill` to `"allow"` to opt that mode out of the
 first-use prompt, or to `"deny"` to block.)
 
-**Protected paths.** Unless a mode sets `bypassProtectedPaths` (only YOLO does),
+**Protected paths.** Unless a mode sets `bypassProtectedPaths` (only Accept does),
 `edit`/`write` to protected paths are hard-blocked - matched by path segment, not
 loose substring, on both the literal target **and** its symlink-resolved
 canonical path (so a link pointing at `.git/` or a dotfile can't smuggle a write
 past the backstop). The set mirrors the sandbox-runtime mandatory-deny list: `.git/`,
 `node_modules/`, `.vscode/`, `.idea/`, `.env`/`.env.*`, `.claude/{commands,agents}/`,
 and common dotfiles (`.bashrc`, `.zshrc`, `.profile`, `.gitconfig`, `.npmrc`, …).
-This matters most in Build, where file tools aren't OS-sandboxed.
+This matters most in Edits, where file tools aren't OS-sandboxed.
 
 ---
 
@@ -451,30 +479,33 @@ Modes are data, layered in this order:
 ```jsonc
 {
   "$schema": "https://raw.githubusercontent.com/qingshanblue/qings-pi-modes/main/schemas/permission-mode.schema.json",
-  "defaultMode": "default",
-  "cycleOrder": ["default", "plan", "build", "automode", "yolo"],
+  "defaultMode": "ask",
+  "cycleOrder": ["plan", "ask", "edits", "auto", "accept"],
+  "sandbox": {                         // the shared OS-sandbox profile (one place; global-only)
+    "allowWrite": [".", "/tmp/pi"],  // the sandbox state (ctrl+s) toggles confinement around this profile
+    "denyRead": ["~/.ssh", "~/.aws", "~/.gnupg"],
+    "allowRead": [],                 // readable again inside denyRead (see "Strict home" below)
+    "denyWrite": [],
+  },
+  "network": {                          // the network boundary — an INDEPENDENT axis (ctrl+n)
+    "allowedDomains": ["github.com", "*.github.com"],
+    "deniedDomains": [],
+    "askOnBlockedHost": true            // live prompt for hosts outside the allowlist (false = silent deny)
+  },
+  "statusFormat": "compact",            // footer verbosity: "compact" (default) or "verbose"
   "classifier": {                       // AI safety classifier for modes with "classifier": true
     "model": "current",                 // "current" = the active session model; else "provider/model"
     "timeoutMs": 15000,
     "failClosed": true                   // error/timeout blocks the action (false = fall back to a prompt)
   },
-  "modes": {
-    "default": {                        // values here are illustrative - run /perm init for the real defaults
-      "label": "Default",
+    "modes": {
+    "ask": {                        // values here are illustrative - run /perm init for the real defaults
+      "label": "Ask",
       "color": "muted",                 // muted | mdLink | accent | error | warning
       "systemPrompt": "@plan",          // optional; "@plan" = the dated Plan-mode prompt
       "injectSandboxInfo": true,        // inject the mode's sandbox boundaries into the system prompt (default true)
       "classifier": false,               // true = route this mode's "ask" decisions to the AI classifier
-      "sandbox": {
-        "enabled": true,                // false = run bash unsandboxed (YOLO-style)
-        "writable": true,               // false = bash runs read-only (Plan-style)
-        "allowWrite": [".", "/tmp/pi"],
-        "denyRead": ["~/.ssh", "~/.aws", "~/.gnupg"],
-        "allowRead": [],                // readable again inside denyRead (see "Strict home" below)
-        "denyWrite": [],
-        "network": { "allowedDomains": ["github.com", "*.github.com"], "deniedDomains": [] },
-        "askOnBlockedHost": true          // live prompt for hosts outside the allowlist (false = silent deny)
-      },
+      "sandboxPin": "on",               // optional: force the sandbox state (off|on|ro) while this mode is active
       "permission": {
         "path": { "*": "allow", "*.env": "deny" },  // cross-cutting gate (deny overrides per-tool allow)
         "external_directory": "ask",                // the out-of-project boundary

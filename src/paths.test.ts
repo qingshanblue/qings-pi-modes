@@ -200,8 +200,11 @@ test("sandboxAllowedRoots: allowWrite resolved to absolute roots + the runtime t
   const home = os.homedir();
   const roots = sandboxAllowedRoots(ROOT, { enabled: true, writable: true, allowWrite: [".", "/tmp", "~/scratch", "build/*"] });
   assert.deepEqual(roots, [ROOT, "/tmp", `${home}/scratch`, ...SANDBOX_RUNTIME_TMP_PATHS]); // glob entry skipped
-  // Non-sandboxing mode: no bounds (allowWrite is meaningless there).
-  assert.deepEqual(sandboxAllowedRoots(ROOT, { enabled: false, writable: true, allowWrite: ["/tmp"] }), []);
+  // Decoupled: the in-bounds set no longer depends on `enabled` — with the
+  // sandbox off, the policy's notion of "inside" is unchanged (work as usual).
+  // Decoupled: the in-bounds set no longer depends on `enabled` — with the
+  // sandbox off, the policy's notion of "inside" is unchanged (work as usual).
+  assert.deepEqual(sandboxAllowedRoots(ROOT, { enabled: false, writable: true, allowWrite: ["/tmp"] }), ["/tmp", ...SANDBOX_RUNTIME_TMP_PATHS]);
   // Read-only sandbox (Plan) keeps its roots: reads there are fine, writes fail in the sandbox as in-project.
   assert.ok(sandboxAllowedRoots(ROOT, { enabled: true, writable: false, allowWrite: ["/tmp"] }).includes("/tmp"));
   assert.deepEqual(sandboxAllowedRoots(ROOT, { enabled: true, writable: true }), SANDBOX_RUNTIME_TMP_PATHS);

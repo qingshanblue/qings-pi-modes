@@ -28,9 +28,11 @@ import type { ClassifierConfig } from "./classifier.ts";
 import {
   type Action,
   type ModeDef,
+  type NetworkConfig,
   PLAN_PROMPT_SENTINEL,
   type PermissionModeConfig,
   type SandboxProfile,
+  type SandboxState,
   type SurfaceValue,
   type Surface,
   SURFACES,
@@ -73,6 +75,9 @@ export function hasMode(modes: Record<string, unknown>, name: unknown): name is 
 
 const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
 const MODE_COLORS = new Set(["muted", "mdLink", "accent", "error", "warning"]);
+
+const SANDBOX_STATES = new Set(["off", "on", "strict"]);
+const isSandboxState = (v: unknown): v is SandboxState => typeof v === "string" && SANDBOX_STATES.has(v);
 
 /**
  * Keep only well-typed sandbox fields from a raw override, warning about the
@@ -133,20 +138,20 @@ function sanitizeSandbox(raw: unknown, where: string, onError: OnError): Partial
  * so this never silently stands in for them in a healthy install.
  */
 export const FALLBACK_CONFIG: PermissionModeConfig = {
-  defaultMode: "default",
-  cycleOrder: ["default"],
+  defaultMode: "ask",
+  cycleOrder: ["ask"],
+  sandbox: {
+    enabled: true,
+    writable: true,
+    allowWrite: ["."],
+    denyWrite: [],
+    denyRead: ["~/.ssh", "~/.aws", "~/.gnupg"],
+    network: { allowedDomains: [], deniedDomains: [] },
+  },
   modes: {
-    default: {
-      label: "Default",
+    ask: {
+      label: "Ask",
       color: "muted",
-      sandbox: {
-        enabled: true,
-        writable: true,
-        allowWrite: ["."],
-        denyWrite: [],
-        denyRead: ["~/.ssh", "~/.aws", "~/.gnupg"],
-        network: { allowedDomains: [], deniedDomains: [] },
-      },
       permission: {
         path: { "*": "allow" },
         external_directory: "ask",
@@ -219,6 +224,16 @@ export function isUnsafeDomain(d: string): boolean {
 const union = (a: string[] = [], b: string[] = []): string[] => [...new Set([...a, ...b])];
 const intersect = (a: string[] = [], b: string[] = []): string[] => a.filter((x) => b.includes(x));
 
+/** A benign empty profile: the base for `tightenSandbox` when no top-level sandbox exists yet. */
+const EMPTY_SANDBOX: SandboxProfile = {
+  enabled: true,
+  writable: true,
+  allowWrite: [],
+  denyWrite: [],
+  denyRead: [],
+  network: { allowedDomains: [], deniedDomains: [] },
+};
+
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
@@ -289,7 +304,7 @@ function mergeMode(base: ModeDef, over: Partial<ModeDef>): ModeDef {
   return {
     ...base,
     ...over,
-    sandbox: over.sandbox ? { ...base.sandbox, ...over.sandbox } : base.sandbox,
+    sandbox: over.sandbox ? { ...(base.sandbox ?? {}), ...over.sandbox } : base.sandbox,
     // Surface-level shallow merge: an override replaces a whole surface's value.
     permission: { ...base.permission, ...(over.permission ?? {}) },
     hideTools: over.hideTools ?? base.hideTools,
@@ -322,6 +337,10 @@ function mergeGlobal(base: PermissionModeConfig, over: Partial<PermissionModeCon
     const m: Partial<ModeDef> = { ...(raw as Partial<ModeDef>) };
     if (raw.permission !== undefined) m.permission = cleanPermission(raw.permission, where, onError) as ModeDef["permission"];
     if (raw.sandbox !== undefined) m.sandbox = sanitizeSandbox(raw.sandbox, where, onError) as SandboxProfile;
+    if (raw.sandboxPin !== undefined && !isSandboxState(raw.sandboxPin)) {
+      onError(`permission-mode: ignoring sandboxPin in ${where}: must be "off", "on" or "strict"`);
+      delete m.sandboxPin;
+    }
     if (raw.classifier !== undefined && typeof raw.classifier !== "boolean") {
       onError(`permission-mode: ignoring classifier in ${where}: must be a boolean`);
       delete m.classifier;
@@ -333,27 +352,18 @@ function mergeGlobal(base: PermissionModeConfig, over: Partial<PermissionModeCon
     if (hasMode(modes, name)) {
       modes[name] = mergeMode(modes[name], m);
     } else {
-      // A new mode: label, color, and a sandbox object are required; the
-      // sandbox booleans default to the safe side and permission to {}
-      // (which resolves to "ask" everywhere), each with a warning.
-      if (typeof m.label !== "string" || !MODE_COLORS.has(String(m.color)) || !isPlainObject(raw.sandbox)) {
-        onError(`permission-mode: ignoring incomplete new global mode "${name}" (needs label, color, sandbox)`);
+      // A new mode: label and color are required; the sandbox profile is the
+      // shared top-level one (a mode's own `sandbox` is a legacy override), and
+      // permission defaults to {} (which resolves to "ask" everywhere).
+      if (typeof m.label !== "string" || !MODE_COLORS.has(String(m.color))) {
+        onError(`permission-mode: ignoring incomplete new global mode "${name}" (needs label, color)`);
         continue;
-      }
-      const sandbox = m.sandbox as Partial<SandboxProfile>;
-      if (typeof sandbox.enabled !== "boolean") {
-        onError(`permission-mode: ${where}: sandbox.enabled missing; defaulting to true`);
-        sandbox.enabled = true;
-      }
-      if (typeof sandbox.writable !== "boolean") {
-        onError(`permission-mode: ${where}: sandbox.writable missing; defaulting to true`);
-        sandbox.writable = true;
       }
       if (m.permission === undefined) {
         onError(`permission-mode: ${where}: no permission block; every surface will ask`);
         m.permission = {};
       }
-      modes[name] = { ...m, label: m.label, color: m.color as ModeDef["color"], sandbox: sandbox as SandboxProfile, permission: m.permission };
+      modes[name] = { ...m, label: m.label, color: m.color as ModeDef["color"], permission: m.permission };
     }
     warnModeContradictions(name, modes[name], onError);
   }
@@ -363,13 +373,52 @@ function mergeGlobal(base: PermissionModeConfig, over: Partial<PermissionModeCon
   const plan = sanitizePlan(over.plan, onError) ?? base.plan;
   const classifier = sanitizeClassifier(over.classifier, onError);
   const mergedClassifier = classifier ? { ...(base.classifier ?? {}), ...classifier } : base.classifier;
+  let sandbox = base.sandbox;
+  if (over.sandbox !== undefined) {
+    const patch = sanitizeSandbox(over.sandbox, "global sandbox", onError);
+    sandbox = { ...(base.sandbox ?? {}), ...patch } as SandboxProfile;
+  }
+  let network = base.network;
+  if (over.network !== undefined) {
+    const patch = sanitizeNetwork(over.network, "global network", onError);
+    network = { ...(base.network ?? {}), ...patch } as NetworkConfig;
+  }
+  const statusFormat = over.statusFormat === "verbose" || over.statusFormat === "compact" ? over.statusFormat : base.statusFormat;
   return {
     defaultMode,
     cycleOrder,
     modes,
+    ...(sandbox ? { sandbox } : {}),
+    ...(network ? { network } : {}),
     ...(plan ? { plan } : {}),
     ...(mergedClassifier ? { classifier: mergedClassifier } : {}),
+    ...(statusFormat ? { statusFormat } : {}),
   };
+}
+
+/** Validate the top-level `network` block; only present, well-typed keys survive. */
+function sanitizeNetwork(raw: unknown, where: string, onError: OnError): Partial<NetworkConfig> {
+  const out: Partial<NetworkConfig> = {};
+  if (!isPlainObject(raw)) {
+    onError(`permission-mode: ${where} must be an object; ignoring`);
+    return out;
+  }
+  for (const [k, v] of safeEntries(raw)) {
+    switch (k) {
+      case "allowedDomains":
+      case "deniedDomains":
+        if (isStringArray(v)) out[k] = v;
+        else onError(`permission-mode: ignoring network.${k} in ${where}: must be a string array`);
+        break;
+      case "askOnBlockedHost":
+        if (typeof v === "boolean") out.askOnBlockedHost = v;
+        else onError(`permission-mode: ignoring network.askOnBlockedHost in ${where}: must be a boolean`);
+        break;
+      default:
+        onError(`permission-mode: ignoring unknown network field "${k}" in ${where}`);
+    }
+  }
+  return out;
 }
 
 /** The allowed top-level `classifier` keys. */
@@ -484,6 +533,31 @@ function applyProject(config: PermissionModeConfig, project: unknown, onError: O
   if (project.classifier !== undefined) {
     onError("permission-mode: project config cannot set classifier (reviewer settings are global); ignoring");
   }
+  if (project.sandbox !== undefined) {
+    config.sandbox = tightenSandbox(config.sandbox ?? EMPTY_SANDBOX, project.sandbox, "project sandbox", onError);
+  }
+  if (project.network !== undefined) {
+    // Tighten-only for the network axis too: intersect allow (dropping overly
+    // broad patterns), union deny, and a project may force silent-deny but
+    // never re-enable asking.
+    const patch = sanitizeNetwork(project.network, "project network", onError);
+    const baseNet = config.network ?? {};
+    const safeAllowed = (patch.allowedDomains ?? []).filter((d) => {
+      if (isUnsafeDomain(d)) {
+        onError(`permission-mode: ignoring overly-broad allowedDomains pattern "${d}" in project config`);
+        return false;
+      }
+      return true;
+    });
+    config.network = {
+      allowedDomains:
+        patch.allowedDomains !== undefined
+          ? intersect(baseNet.allowedDomains ?? [], safeAllowed)
+          : baseNet.allowedDomains,
+      deniedDomains: patch.deniedDomains !== undefined ? union(baseNet.deniedDomains ?? [], patch.deniedDomains) : baseNet.deniedDomains,
+      askOnBlockedHost: patch.askOnBlockedHost === false ? false : baseNet.askOnBlockedHost,
+    };
+  }
   if (project.modes !== undefined && !isPlainObject(project.modes)) {
     onError("permission-mode: project config modes must be an object; ignoring");
     return;
@@ -500,7 +574,10 @@ function applyProject(config: PermissionModeConfig, project: unknown, onError: O
         onError(`permission-mode: ${where} must be an object; ignoring`);
         continue;
       }
-      if (raw.sandbox !== undefined) base.sandbox = tightenSandbox(base.sandbox, raw.sandbox, where, onError);
+      if (raw.sandbox !== undefined) base.sandbox = tightenSandbox(base.sandbox ?? EMPTY_SANDBOX, raw.sandbox, where, onError);
+      if (raw.sandboxPin !== undefined) {
+        onError(`permission-mode: project config cannot set sandboxPin for mode "${name}"; ignoring`);
+      }
       if (raw.classifier !== undefined) {
         onError(`permission-mode: project config cannot set classifier for mode "${name}"; ignoring`);
       }
@@ -647,17 +724,14 @@ export function persistModeDomains(agentDir: string, modeName: string, domains: 
   const file = globalConfigFile(agentDir);
   if (UNSAFE_KEYS.has(modeName)) throw new Error(`invalid mode name "${modeName}"`);
   const base = loadGlobalModeConfig(agentDir);
-  const baseNetwork = hasMode(base.modes, modeName) ? base.modes[modeName].sandbox.network : undefined;
+  const baseNetwork = base.network?.askOnBlockedHost !== undefined || base.network
+    ? { allowedDomains: base.network?.allowedDomains, deniedDomains: base.network?.deniedDomains }
+    : undefined;
 
   const data = readGlobalForWrite(file);
-  const modes = (data.modes ??= {}) as Record<string, { sandbox?: { network?: Record<string, unknown> } }>;
-  const mode = (modes[modeName] ??= {});
-  const sandbox = (mode.sandbox ??= {});
-  sandbox.network = {
-    ...baseNetwork,
-    allowedDomains: [...new Set([...(baseNetwork?.allowedDomains ?? []), ...domains])],
-    deniedDomains: baseNetwork?.deniedDomains ?? [],
-  };
+  const network = (data.network ??= {}) as { allowedDomains?: string[]; deniedDomains?: string[] };
+  network.allowedDomains = [...new Set([...(baseNetwork?.allowedDomains ?? []), ...domains])];
+  network.deniedDomains = baseNetwork?.deniedDomains ?? [];
 
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`);

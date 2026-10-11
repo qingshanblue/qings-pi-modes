@@ -55,13 +55,13 @@ export interface PendingPlan {
 
 /** Top-level `plan` config (global only; a project config cannot set it). */
 export interface PlanApprovalConfig {
-  /** Mode to switch to on approval. Default "build". */
+  /** Mode to switch to on approval. Default "edits". */
   approveMode?: string;
   /** The user message that starts the implementing turn; `{path}` is the plan path. */
   approveMessage?: string;
 }
 
-export const DEFAULT_APPROVE_MODE = "build";
+export const DEFAULT_APPROVE_MODE = "edits";
 export const DEFAULT_APPROVE_MESSAGE = "The plan in `{path}` is approved. Implement it now.";
 
 /** The approval message for `path`: the template with `{path}` filled in, or the default when the template is empty. */

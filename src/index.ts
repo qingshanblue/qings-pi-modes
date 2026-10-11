@@ -51,6 +51,7 @@ import { askWithSession, BlockedPaths, type DenyOption, SessionApprovals } from 
 import { sandboxAwarenessPrompt } from "./awareness.ts";
 import { bashExecPlan, bashGate } from "./bash-enforce.ts";
 import { analyzeBash, escapeTargetFromReason, escapingPaths } from "./bash-parse.ts";
+import { isSafeBashChain } from "./safe-command.ts";
 import {
   auditStaleDefaults,
   defaultsChangedSince,
@@ -101,6 +102,7 @@ import {
   type PermissionModeConfig,
   planModeSystemPrompt,
   type SandboxProfile,
+  type SandboxState,
   type Surface,
 } from "./schema.ts";
 import { createShowPlanTool } from "./show-plan.ts";
@@ -183,11 +185,42 @@ export default async function (pi: ExtensionAPI) {
   // effective profile's denyRead so the OS sandbox masks them for bash, and
   // checked directly for the (unsandboxed) file tools.
   const blocked = new BlockedPaths();
+  // The sandbox is DECOUPLED from the mode: `alt+s` cycles this session state
+  // (`off` / `on` / `ro`), and a mode may pin it (`sandboxPin`, e.g. Plan → ro).
+  // The shared profile (allowWrite / denyRead / network / …) lives in
+  // `config.sandbox`; a mode's own legacy `sandbox` still overrides it.
+  let sessionSandboxState: SandboxState = "on";
+  /** A minimal safe profile when a config somehow lacks the top-level sandbox. */
+  const FALLBACK_SANDBOX: SandboxProfile = {
+    enabled: true,
+    writable: true,
+    allowWrite: ["."],
+    denyWrite: [],
+    denyRead: ["~/.ssh", "~/.aws", "~/.gnupg"],
+    network: { allowedDomains: [], deniedDomains: [] },
+  };
+  /** The state that applies to `m`: its pin, else a legacy override, else the session state. */
+  const effectiveSandboxState = (m: ModeDef): SandboxState => {
+    if (m.sandboxPin) return m.sandboxPin;
+    if (m.sandbox?.enabled === false) return "off";
+    return sessionSandboxState;
+  };
+  /** The mode's sandbox profile with the effective state applied. */
+  const modeSandbox = (m: ModeDef): SandboxProfile => {
+    const base = config.sandbox ?? FALLBACK_SANDBOX;
+    const merged = m.sandbox ? { ...base, ...m.sandbox } : base;
+    const state = effectiveSandboxState(m);
+    // The network boundary is an INDEPENDENT axis: the top-level `network`
+    // block wins over any legacy profile value.
+    const network = config.network ? { ...merged.network, ...config.network } : merged.network;
+    const askOnBlockedHost = config.network?.askOnBlockedHost ?? merged.askOnBlockedHost;
+    return { ...merged, enabled: state !== "off", writable: state !== "off", network, askOnBlockedHost };
+  };
   // What the runtime is initialized with: the mode's profile plus the scratch
   // dir. The session's "Deny and block" paths are NOT part of it - they ride
   // along per command (sandbox.bashOps extraDenyRead), so a block never
   // restarts the runtime or its network proxy.
-  const runtimeProfile = (m: ModeDef): SandboxProfile => withScratchDir(m.sandbox, scratchDir);
+  const runtimeProfile = (m: ModeDef): SandboxProfile => withScratchDir(modeSandbox(m), scratchDir);
   // What bash effectively runs under, for the bounds, the awareness prompt, and /sandbox.
   const effectiveSandbox = (m: ModeDef): SandboxProfile => withDeniedReads(runtimeProfile(m), blocked.list());
 
@@ -206,10 +239,8 @@ export default async function (pi: ExtensionAPI) {
   const classifierChip = (ctx: ExtensionContext, m: ModeDef): string | undefined => {
     if (!m.classifier) return undefined;
     const cfg = normalizeClassifierConfig(config.classifier);
-    if (!cfg.enabled) return "AI off";
-    const ref = cfg.model === "current" ? (ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "current") : cfg.model;
-    const short = ref.includes("/") ? ref.slice(ref.indexOf("/") + 1) : ref;
-    return `AI:${short}`;
+    if (!cfg.enabled) return "AI:off";
+    return `AI:${cfg.model === "current" ? "current-model" : cfg.model}`;
   };
 
   /** Render the `perm` status chip, appending the classifier chip in AI modes. */
@@ -218,7 +249,16 @@ export default async function (pi: ExtensionAPI) {
     m: ModeDef,
     sandboxState: Parameters<typeof renderStatus>[2],
     networkOpen: boolean,
-  ): void => renderStatus(ctx, m, sandboxState, networkOpen, classifierChip(ctx, m));
+  ): void =>
+    renderStatus(
+      ctx,
+      { ...m, sandbox: effectiveSandbox(m) },
+      sandboxState,
+      networkOpen,
+      classifierChip(ctx, m),
+      (config.statusFormat ?? "compact") === "compact",
+      effectiveSandboxState(m),
+    );
   // One-step plan approval (plan-approval.ts): the plan show_plan rendered
   // last is offered for approval when the agent goes idle (A), confirmed on a
   // manual switch into the approve mode (B), and taken by /plan approve (C).
@@ -240,7 +280,7 @@ export default async function (pi: ExtensionAPI) {
   /** Prompt the user about a blocked host (the connection waits meanwhile). */
   const askNetHost = async (host: string, port: number | undefined): Promise<NetAskResult> => {
     const ctx = uiCtx;
-    if (!ctx?.hasUI || currentMode().sandbox.askOnBlockedHost === false) return "dismiss";
+    if (!ctx?.hasUI || effectiveSandbox(currentMode()).askOnBlockedHost === false) return "dismiss";
     const target = port !== undefined ? `${host}:${port}` : host;
     const choice = await ctx.ui.select(`Network: bash wants to reach ${target} (not in the allowlist) — allow?`, [
       "Allow for session",
@@ -264,8 +304,9 @@ export default async function (pi: ExtensionAPI) {
 
   /**
    * Ask the AI classifier about a pending `ask`, falling back to the human
-   * prompt per its policy. Never lets the model authorize an unsandboxed run
-   * (`review.escalateToHuman`) — those always go to the human.
+   * prompt per its policy. The classifier judges EVERY ask — including commands
+   * that will run unsandboxed: `auto` means the AI is the gate, and the sandbox
+   * state (ctrl+s) is what bounds execution, independently of who approves.
    */
   const autoDecide = async (
     ctx: ExtensionContext,
@@ -287,8 +328,6 @@ export default async function (pi: ExtensionAPI) {
         onForever,
         denyAnd,
       );
-    // Never let the model authorize an unsandboxed run — the human approves those.
-    if (review.escalateToHuman) return humanPrompt();
     const cfg = normalizeClassifierConfig(config.classifier);
     if (!cfg.enabled) return humanPrompt();
     const targets = Array.isArray(target) ? target : [target];
@@ -300,6 +339,7 @@ export default async function (pi: ExtensionAPI) {
       input: review.input,
       cwd: ctx.cwd ?? root,
       isOutside: review.isOutside,
+      recentUserRequest: lastUserRequest(ctx),
     };
     const key = subjectKey(subject, cfg.model);
     let verdict = classifierCache.get(key);
@@ -480,7 +520,6 @@ export default async function (pi: ExtensionAPI) {
     await sandbox.applyProfile(runtimeProfile(m)); // re-init runtime if the profile changed
     applyToolVisibility();
     updateStatus(ctx, m, sandbox, net.open);
-    ctx.ui.notify(`Permission mode: ${m.label}`, "info");
     if (persist) pi.appendEntry<PermState>("perm-mode", { mode: modeName });
     // B: a manual switch into the approve mode while a plan is pending (alt+m,
     // /perm <mode>). Not on session_start/resume (persist=false) and not for
@@ -559,15 +598,12 @@ export default async function (pi: ExtensionAPI) {
 
   /** The most restrictive built-in-style mode for a headless child without a
    * forwarded mode: a read-only sandboxed mode if any, else the default. */
-  const safeChildMode = (): string => {
-    // Search the cycle order first (deterministic), then every other mode: a
-    // global config whose cycleOrder lists only YOLO must not make a headless
-    // child start unsandboxed while Plan/Default still exist.
-    const candidates = [...new Set([...config.cycleOrder, ...Object.keys(config.modes)])].filter((n) => hasMode(config.modes, n));
-    const ro = candidates.find((n) => config.modes[n].sandbox.enabled && !config.modes[n].sandbox.writable);
-    const sandboxed = candidates.find((n) => config.modes[n].sandbox.enabled);
-    return ro ?? sandboxed ?? config.defaultMode;
-  };
+  /**
+   * The mode for a headless child without a forwarded mode: its defaultMode.
+   * The sandbox state independently defaults to `on` for children (and is
+   * forwarded explicitly otherwise), so even a permissive default is confined.
+   */
+  const safeChildMode = (): string => config.defaultMode;
 
   const cycle = async (ctx: ExtensionContext) => {
     const order = config.cycleOrder;
@@ -606,8 +642,12 @@ export default async function (pi: ExtensionAPI) {
     return { name: resolved ?? modeName, fallback: false };
   };
 
-  pi.registerShortcut("alt+m", {
+  pi.registerShortcut("ctrl+q", {
     description: `Cycle permission mode (${config.cycleOrder.join(" -> ")})`,
+    handler: async (ctx) => cycle(ctx),
+  });
+  pi.registerShortcut("alt+m", {
+    description: "Cycle permission mode (alias of ctrl+q)",
     handler: async (ctx) => cycle(ctx),
   });
   pi.registerCommand("perm", {
@@ -695,7 +735,7 @@ export default async function (pi: ExtensionAPI) {
       }
     },
   });
-  const networkEnforcing = () => sandbox.ready && networkFiltered(currentMode().sandbox);
+  const networkEnforcing = () => sandbox.ready && networkFiltered(effectiveSandbox(currentMode()));
 
   const toggleNetwork = async (ctx: ExtensionContext) => {
     uiCtx = ctx;
@@ -704,16 +744,14 @@ export default async function (pi: ExtensionAPI) {
     }
     net.open = !net.open;
     updateStatus(ctx, currentMode(), sandbox, net.open);
-    ctx.ui.notify(
-      net.open
-        ? "Network: OPEN for this session — domain filtering disabled (alt+n or /net restrict to re-enable)"
-        : "Network: filtered — domain allowlist active",
-      net.open ? "warning" : "info",
-    );
   };
 
-  pi.registerShortcut("alt+n", {
+  pi.registerShortcut("ctrl+n", {
     description: "Toggle network filtering for this session (filtered <-> open)",
+    handler: toggleNetwork,
+  });
+  pi.registerShortcut("alt+n", {
+    description: "Toggle network filtering (alias of ctrl+n)",
     handler: toggleNetwork,
   });
 
@@ -778,7 +816,7 @@ export default async function (pi: ExtensionAPI) {
       return ctx.ui.notify(
         [
           `Network (${m.label}): ${state}`,
-          `Mode allowlist: ${m.sandbox.network?.allowedDomains?.join(", ") || "(none)"}`,
+          `Mode allowlist: ${modeSandbox(m).network?.allowedDomains?.join(", ") || "(none)"}`,
           `Session grants: ${net.grants().join(", ") || "(none)"}`,
           `Session denies: ${net.denies().join(", ") || "(none)"}`,
         ].join("\n"),
@@ -787,19 +825,64 @@ export default async function (pi: ExtensionAPI) {
     },
   });
 
+  /** Set the session sandbox state (alt+s / /sandbox on|off|ro). */
+  const setSandboxState = async (state: SandboxState, ctx: ExtensionContext, persist = true): Promise<void> => {
+    uiCtx = ctx;
+    sessionSandboxState = state;
+    process.env.PI_PERMISSION_SANDBOX = state;
+    const m = currentMode();
+    await sandbox.applyProfile(runtimeProfile(m)); // no-op when the effective profile is unchanged (a pinned mode)
+    updateStatus(ctx, m, sandbox, net.open);
+    if (persist) pi.appendEntry("perm-sandbox", { state });
+  };
+  const cycleSandbox = async (ctx: ExtensionContext): Promise<void> => {
+    const order: SandboxState[] = ["off", "on", "strict"];
+    await setSandboxState(order[(order.indexOf(sessionSandboxState) + 1) % order.length], ctx);
+  };
+
+  /**
+   * The user's most recent message — the classifier's authorization context.
+   * Without it the reviewer only sees the raw action and over-denies legitimate
+   * work (it cannot tell an intended edit from a rogue one).
+   */
+  const lastUserRequest = (ctx: ExtensionContext): string | undefined => {
+    const entries = ctx.sessionManager.getBranch?.() ?? ctx.sessionManager.getEntries();
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const e = entries[i] as { type?: string; message?: { role?: string; content?: unknown } };
+      if (e?.type !== "message" || e.message?.role !== "user") continue;
+      const content = e.message.content;
+      let text = "";
+      if (typeof content === "string") {
+        text = content;
+      } else if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block && typeof block === "object" && "text" in block) text += String((block as { text?: unknown }).text ?? "");
+        }
+      }
+      const cleaned = text.replace(/\s+/g, " ").trim();
+      return cleaned || undefined;
+    }
+    return undefined;
+  };
+
   pi.registerCommand("sandbox", {
-    description: "Show the active mode's sandbox status and configuration",
-    handler: async (_args, ctx) => {
+    description: "Show or set the sandbox state: /sandbox [off|on|strict]",
+    handler: async (args, ctx) => {
+      const arg = (args ?? "").trim().toLowerCase();
+      if (arg === "off" || arg === "on" || arg === "strict") return setSandboxState(arg, ctx);
+      if (arg && arg !== "status") return ctx.ui.notify(`permission-mode: usage: /sandbox [off|on|strict] (got "${arg}")`, "warning");
       const m = currentMode();
-      if (!m.sandbox.enabled) {
-        return ctx.ui.notify(`${m.label}: sandbox disabled for this mode (bash runs unsandboxed)`, "info");
+      const sb = modeSandbox(m);
+      if (m.sandboxPin) ctx.ui.notify(`permission-mode: ${m.label} pins the sandbox to "${m.sandboxPin}"`, "info");
+      if (!sb.enabled) {
+        return ctx.ui.notify(`${m.label}: sandbox OFF (state ${effectiveSandboxState(m)}) — bash runs unsandboxed`, "info");
       }
       if (sandbox.disabled) return ctx.ui.notify("Sandbox disabled via --no-sandbox", "info");
       if (!sandbox.ready) return ctx.ui.notify(`Sandbox unavailable: ${sandbox.warn ?? "unknown"}`, "warning");
       const c = profileToConfig(effectiveSandbox(m));
       ctx.ui.notify(
         [
-          `Sandbox: ACTIVE for ${m.label} (${m.sandbox.writable ? "project-writable" : "read-only"})`,
+          `Sandbox: ACTIVE for ${m.label} (state: ${effectiveSandboxState(m)})`,
           "",
           `Scratch dir: ${scratchDir ?? "(none)"}`,
           `Network: ${net.open ? "OPEN for this session (alt+n)" : "filtered (alt+n)"}`,
@@ -817,6 +900,14 @@ export default async function (pi: ExtensionAPI) {
       );
     },
   });
+  pi.registerShortcut("ctrl+s", {
+    description: "Cycle sandbox state (off → on → strict)",
+    handler: cycleSandbox,
+  });
+  pi.registerShortcut("alt+s", {
+    description: "Cycle sandbox state (alias of ctrl+s)",
+    handler: cycleSandbox,
+  });
 
   // Replace built-in bash so the sandbox can wrap it. Sandboxing is recomputed at
   // run time from the active mode's profile: disabled (YOLO), approved escapes,
@@ -826,8 +917,9 @@ export default async function (pi: ExtensionAPI) {
     async execute(id, params, signal, onUpdate, _ctx) {
       const approved = approvedUnsandboxed.delete(id); // user granted an escape
       const m = currentMode();
-      const plan = bashExecPlan(m.sandbox.enabled, m.sandbox.writable, sandbox.ready, approved);
-      if (m.sandbox.enabled && !approved && !plan.sandboxed) {
+      const sb = modeSandbox(m);
+      const plan = bashExecPlan(sb.enabled, true, sandbox.ready, approved); // boundary-only: the sandbox never makes bash read-only
+      if (sb.enabled && !approved && !plan.sandboxed) {
         // The gate allowed this call because the sandbox was ready; it isn't
         // any more (a failed profile switch, a re-init in flight). Never
         // degrade silently to an unsandboxed run: fail the call instead.
@@ -869,12 +961,12 @@ export default async function (pi: ExtensionAPI) {
       const text = (t: string) => ({ content: [{ type: "text" as const, text: t }], details: {} });
       const { domains = [], reason = "" } = params as { domains?: string[]; reason?: string };
       const m = currentMode();
-      if (!sandbox.ready || !networkFiltered(m.sandbox) || net.open) {
+      if (!sandbox.ready || !networkFiltered(modeSandbox(m)) || net.open) {
         return text("Network is not filtered right now - no grant needed, just run the command.");
       }
       const normalized = [...new Set(domains.map(normalizeDomain).filter((d): d is string => d !== undefined))];
       const rejected = normalized.filter(isUnsafeDomain);
-      const modeList = m.sandbox.network?.allowedDomains ?? [];
+      const modeList = modeSandbox(m).network?.allowedDomains ?? [];
       const covered = (d: string) =>
         modeList.includes(d) || net.grants().includes(d) || (!d.startsWith("*.") && (isHostAllowed(d, modeList) || net.isGranted(d)));
       const need = normalized.filter((d) => !isUnsafeDomain(d) && !covered(d));
@@ -993,6 +1085,20 @@ export default async function (pi: ExtensionAPI) {
       delete process.env.CLAUDE_TMPDIR;
       if (ctx.hasUI) ctx.ui.notify(`permission-mode: could not create the scratch directory ${dir}`, "warning");
     }
+    // Restore the sandbox state: forwarded env > persisted entry > the "on"
+    // default. It is exported so child pi processes inherit the same state.
+    {
+      const valid = (v: unknown): v is SandboxState => v === "off" || v === "on" || v === "ro";
+      const envSb = process.env.PI_PERMISSION_SANDBOX;
+      if (valid(envSb)) sessionSandboxState = envSb;
+      else
+        for (const entry of ctx.sessionManager.getEntries()) {
+          if (entry.type !== "custom" || entry.customType !== "perm-sandbox") continue;
+          const st = (entry.data as { state?: unknown } | undefined)?.state;
+          if (valid(st)) sessionSandboxState = st;
+        }
+      process.env.PI_PERMISSION_SANDBOX = sessionSandboxState;
+    }
     await sandbox.init({
       cwd: ctx.cwd,
       noSandbox: pi.getFlag("no-sandbox") === true,
@@ -1075,6 +1181,7 @@ export default async function (pi: ExtensionAPI) {
       networkOpen: net.open,
       sessionDomains: net.grants(),
       scratchDir,
+      strict: effectiveSandboxState(m) === "strict",
     });
     if (aware) parts.push(aware);
     const sp = m.systemPrompt;
@@ -1138,9 +1245,9 @@ export default async function (pi: ExtensionAPI) {
     if (toolName === "bash") {
       const command = String(input.command ?? "");
       // Fast path: non-sandboxing modes skip AST escape analysis, but still
-      // honor their explicit bash policy. YOLO remains silent because its
-      // policy is `allow`; an unsandboxed `ask` mode must still prompt.
-      if (!m.sandbox.enabled) {
+      // honor their explicit bash policy. Bypass/Accept remains silent because
+      // its policy is `allow`; an unsandboxed `ask` mode must still prompt.
+      if (!modeSandbox(m).enabled) {
         const gate = bashGate(decide(m, "bash", command), undefined, false, sandbox.ready);
         if (gate.kind === "block") return { block: true, reason: gate.reason };
         if (gate.kind === "prompt") {
@@ -1166,7 +1273,22 @@ export default async function (pi: ExtensionAPI) {
       // A command no layer matches falls back to "ask" (see decideBashChain).
       const action: Action =
         analysis.commands.length > 0 ? decideBashChain(m, analysis.commands) : decide(m, "bash", command);
-      const gate = bashGate(action, analysis.outsideReason, m.sandbox.enabled, sandbox.ready);
+      // Tier 1 fast path: a known read-only command in-bounds runs without prompting
+      // or classifier review (shared by Ask / Edits / Auto). Escapes never qualify.
+      if (action === "ask" && !analysis.outsideReason && isSafeBashChain(analysis.commands, command)) {
+        return undefined;
+      }
+      const strict = effectiveSandboxState(m) === "strict";
+      // In the `strict` sandbox state the boundary is hard: out-of-project access
+      // is blocked outright (no prompt, no escape) — the OS cannot mask system
+      // reads, so this is enforced at the policy layer.
+      if (strict && analysis.outsideReason) {
+        return {
+          block: true,
+          reason: `Sandbox strict: outside-project access is blocked (${analysis.outsideReason})`,
+        };
+      }
+      const gate = bashGate(action, analysis.outsideReason, modeSandbox(m).enabled, sandbox.ready);
       if (gate.kind === "block") return { block: true, reason: gate.reason };
       if (gate.kind === "prompt") {
         // Session approvals are keyed on the extracted command names, and ALL
@@ -1216,10 +1338,20 @@ export default async function (pi: ExtensionAPI) {
         return { block: true, reason: `Path "${path}" is blocked for this session (Deny and block); /perm unblock lifts it` };
       }
       const outside = isOutside(root, path, bounds);
+      // Sandbox `strict`: the boundary is hard for file tools too.
+      if (effectiveSandboxState(m) === "strict" && outside) {
+        return { block: true, reason: `Sandbox strict: outside-project access is blocked (${path})` };
+      }
       const action = decide(m, surface, path, { isOutside: outside });
       if (action === "deny") {
-        // Friendly message for the Plan-mode "Markdown only" case (read-only mode).
-        if ((surface === "edit" || surface === "write") && !m.sandbox.writable) {
+        // Friendly message for a Markdown-only write policy (e.g. Plan Mode).
+        const policy = m.permission[surface];
+        const markdownOnly =
+          (surface === "edit" || surface === "write") &&
+          typeof policy === "object" &&
+          policy !== null &&
+          policy["*"] === "deny";
+        if (markdownOnly) {
           if (ctx.hasUI) ctx.ui.notify(`${m.label} allows editing Markdown files only: ${path}`, "warning");
           return { block: true, reason: `${m.label} allows editing Markdown files only` };
         }
