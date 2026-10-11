@@ -1,7 +1,10 @@
 /**
  * Parity tests — assert the data-driven engine (stock defaults + decide +
- * bash-enforce) reproduces the pre-engine per-mode behavior on representative
- * inputs. These mirror the old policy.test.ts so a reviewer can see parity.
+ * bash-enforce) reproduces the intended per-mode behavior on representative
+ * inputs. The shipped modes are the CC-style set: ask / plan / auto / edits /
+ * bypass. The sandbox is the TOP-LEVEL profile with a per-mode `sandboxPin`;
+ * `sbOf` derives the effective enabled/writable (session state "on" for
+ * unpinned modes) the way index.ts does.
  */
 
 import assert from "node:assert/strict";
@@ -11,10 +14,6 @@ import { loadStockDefaults } from "./config-load.ts";
 import { decide } from "./resolve.ts";
 import type { ModeDef } from "./schema.ts";
 
-// Parity is asserted against the SHIPPED permission-mode.defaults.json, so the
-// stock file (not a code constant) is what's validated. The sandbox is now the
-// TOP-LEVEL profile, with a per-mode `sandboxPin`; `sbOf` derives the effective
-// enabled/writable the way index.ts does (session state "on" for unpinned modes).
 const M = loadStockDefaults().modes;
 const sbOf = (m: ModeDef): { enabled: boolean; writable: boolean } => {
   const st = m.sandboxPin ?? "on";
@@ -22,12 +21,12 @@ const sbOf = (m: ModeDef): { enabled: boolean; writable: boolean } => {
 };
 const OUTSIDE = "path outside project: /etc/passwd";
 
-test("default: confirm bash/write/web_search; reads free; out-of-project asks", () => {
-  const d = M.default;
+test("ask: confirm bash/write/web_search; reads free; out-of-project asks", () => {
+  const d = M.ask;
   const sb = sbOf(d);
   assert.equal(decide(d, "bash", "ls -la"), "ask");
   assert.equal(decide(d, "write", "src/app.ts"), "ask");
-  assert.equal(decide(d, "write", "notes.md"), "ask"); // no markdown carve-out in Default
+  assert.equal(decide(d, "write", "notes.md"), "ask"); // no markdown carve-out in Ask
   assert.equal(decide(d, "edit", "src/app.ts"), "ask");
   assert.equal(decide(d, "web_search", "anything"), "ask");
   assert.equal(decide(d, "read", "src/app.ts"), "allow");
@@ -44,7 +43,7 @@ test("default: confirm bash/write/web_search; reads free; out-of-project asks", 
   });
 });
 
-test("plan: read-only sandbox, Markdown-only writes, reads free", () => {
+test("plan: read-only sandbox (pin), Markdown-only writes, reads free", () => {
   const p = M.plan;
   const sb = sbOf(p);
   assert.equal(decide(p, "write", "plan/2026-06-08_x.md"), "allow");
@@ -63,33 +62,29 @@ test("plan: read-only sandbox, Markdown-only writes, reads free", () => {
     readOnly: true,
   });
   assert.equal(p.systemPrompt, "@plan"); // Plan injects the planning prompt
+  assert.equal(p.sandboxPin, "ro");
 });
 
-test("build: silent in-project writes/bash, sandboxed; out-of-project asks", () => {
-  const b = M.build;
-  const sb = sbOf(b);
-  assert.equal(decide(b, "write", "src/app.ts"), "allow");
-  assert.equal(decide(b, "edit", "src/app.ts"), "allow");
-  assert.equal(decide(b, "bash", "make"), "allow");
-  assert.equal(decide(b, "read", "/etc/hosts", { isOutside: true }), "ask"); // external_directory
-  assert.equal(decide(b, "tool", "some_extension_tool"), "allow"); // Build trusts all tools
-  assert.equal(decide(b, "skill", "deep-research"), "allow");
-  // bash composition: allow, sandboxed writable.
-  const g = bashGate(decide(b, "bash", "make"), undefined, sb.enabled, true);
-  assert.equal(g.kind, "allow");
-  assert.deepEqual(bashExecPlan(sb.enabled, sb.writable, true, false), {
-    sandboxed: true,
-    readOnly: false,
-  });
+test("edits: in-project file edits silent; bash still asks; out-of-project asks", () => {
+  const e = M.edits;
+  const sb = sbOf(e);
+  assert.equal(decide(e, "write", "src/app.ts"), "allow");
+  assert.equal(decide(e, "edit", "src/app.ts"), "allow");
+  assert.equal(decide(e, "bash", "make"), "ask"); // bash is NOT auto-approved in Edits
+  assert.equal(decide(e, "read", "/etc/hosts", { isOutside: true }), "ask"); // external_directory
+  assert.equal(decide(e, "tool", "some_extension_tool"), "ask");
+  assert.equal(decide(e, "skill", "deep-research"), "ask");
+  const g = bashGate(decide(e, "bash", "make"), undefined, sb.enabled, true);
+  assert.equal(g.kind, "prompt");
   // Privilege/escape still prompts and runs unsandboxed on approval.
-  const esc = bashGate(decide(b, "bash", "sudo x"), OUTSIDE, sb.enabled, true);
+  const esc = bashGate(decide(e, "bash", "sudo x"), OUTSIDE, sb.enabled, true);
   assert.equal(esc.kind, "prompt");
   assert.equal(esc.onApproveUnsandboxed, true);
 });
 
-test("yolo: everything allowed, pinned unsandboxed, protected paths bypassed", () => {
-  const y = M.yolo;
-  const sb = sbOf(y);
+test("bypass: everything allowed, protected paths bypassed; decoupled from the sandbox", () => {
+  const y = M.bypass;
+  const sb = sbOf(y); // no pin → the session default ("on")
   assert.equal(decide(y, "write", "src/app.ts"), "allow");
   assert.equal(decide(y, "bash", "rm -rf build"), "allow");
   assert.equal(decide(y, "read", "/etc/passwd", { isOutside: true }), "allow"); // external_directory: allow
@@ -97,8 +92,10 @@ test("yolo: everything allowed, pinned unsandboxed, protected paths bypassed", (
   assert.equal(decide(y, "tool", "some_extension_tool"), "allow");
   assert.equal(decide(y, "skill", "deep-research"), "allow");
   assert.equal(y.bypassProtectedPaths, true);
-  assert.equal(y.sandboxPin, "off"); // YOLO still ships pinned unsandboxed
-  const g = bashGate(decide(y, "bash", "x"), OUTSIDE, sb.enabled, true);
-  assert.equal(g.kind, "allow"); // never prompts, even on an escape
-  assert.equal(bashExecPlan(sb.enabled, sb.writable, true, false).sandboxed, false);
+  assert.equal(y.sandboxPin, undefined); // decoupled: bypass no longer pins the sandbox off
+  // With the sandbox OFF (alt+s off / a pin), an escape is allowed silently …
+  assert.equal(bashGate(decide(y, "bash", "x"), OUTSIDE, false, true).kind, "allow");
+  // … with the sandbox ON the gate would prompt; a trust-all mode (index.ts)
+  // auto-approves it and runs unsandboxed (covered end-to-end in index.test.ts).
+  assert.equal(bashGate(decide(y, "bash", "x"), OUTSIDE, true, true).kind, "prompt");
 });

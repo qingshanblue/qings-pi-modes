@@ -137,8 +137,8 @@ function sanitizeSandbox(raw: unknown, where: string, onError: OnError): Partial
  * so this never silently stands in for them in a healthy install.
  */
 export const FALLBACK_CONFIG: PermissionModeConfig = {
-  defaultMode: "default",
-  cycleOrder: ["default"],
+  defaultMode: "ask",
+  cycleOrder: ["ask"],
   sandbox: {
     enabled: true,
     writable: true,
@@ -148,8 +148,8 @@ export const FALLBACK_CONFIG: PermissionModeConfig = {
     network: { allowedDomains: [], deniedDomains: [] },
   },
   modes: {
-    default: {
-      label: "Default",
+    ask: {
+      label: "Ask",
       color: "muted",
       permission: {
         path: { "*": "allow" },

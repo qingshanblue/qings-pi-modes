@@ -7,6 +7,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
+- **CC-style mode set.** The shipped modes are renamed and re-scoped to
+  `ask` / `plan` / `auto` / `edits` / `bypass` (cycle `ask → plan → auto → edits
+  → bypass`): `edits` (= Claude Code's accept-edits) auto-approves project
+  internal `edit`/`write` but still asks for bash; `bypass` never prompts and no
+  longer pins the sandbox off (decoupled). `plan.approveMode` now defaults to
+  `edits`. A mode's own `sandbox` remains a legacy override.
+- **Auto gains a read-only whitelist fast path (Tier 1).** A known read-only
+  bash command (`ls`, `cat`, `grep`, `git status`, …) with no redirect or
+  substitution runs without a prompt or a model call; `ask` and `edits` share
+  the same whitelist. Escapes still never qualify.
 - **The OS sandbox is decoupled from the mode.** The sandbox profile
   (`allowWrite` / `denyRead` / `network` / …) now lives in a single top-level
   `sandbox` block; a mode carries only a permission policy plus an optional

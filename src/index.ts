@@ -51,6 +51,7 @@ import { askWithSession, BlockedPaths, type DenyOption, SessionApprovals } from 
 import { sandboxAwarenessPrompt } from "./awareness.ts";
 import { bashExecPlan, bashGate } from "./bash-enforce.ts";
 import { analyzeBash, escapeTargetFromReason, escapingPaths } from "./bash-parse.ts";
+import { isSafeBashChain } from "./safe-command.ts";
 import {
   auditStaleDefaults,
   defaultsChangedSince,
@@ -1209,13 +1210,21 @@ export default async function (pi: ExtensionAPI) {
     // Bash.
     if (toolName === "bash") {
       const command = String(input.command ?? "");
+      // A mode that trusts everything (Bypass) skips the approval prompts entirely:
+      // an escape is auto-approved and runs unsandboxed, exactly as before the
+      // sandbox was decoupled.
+      const trustAll = m.bypassProtectedPaths === true;
       // Fast path: non-sandboxing modes skip AST escape analysis, but still
-      // honor their explicit bash policy. YOLO remains silent because its
+      // honor their explicit bash policy. Bypass remains silent because its
       // policy is `allow`; an unsandboxed `ask` mode must still prompt.
       if (!modeSandbox(m).enabled) {
         const gate = bashGate(decide(m, "bash", command), undefined, false, sandbox.ready);
         if (gate.kind === "block") return { block: true, reason: gate.reason };
         if (gate.kind === "prompt") {
+          if (trustAll) {
+            if (gate.onApproveUnsandboxed) approvedUnsandboxed.add(event.toolCallId);
+            return undefined;
+          }
           // Without an AST parse, scope a session grant to the exact command.
           if (
             !(await promptAllow(ctx, "bash", command, gate.title, undefined, undefined, {
@@ -1238,9 +1247,19 @@ export default async function (pi: ExtensionAPI) {
       // A command no layer matches falls back to "ask" (see decideBashChain).
       const action: Action =
         analysis.commands.length > 0 ? decideBashChain(m, analysis.commands) : decide(m, "bash", command);
+      // Tier 1 fast path: a known read-only command in-bounds runs without prompting
+      // or classifier review (shared by Ask / Edits / Auto). Escapes never qualify.
+      if (action === "ask" && !analysis.outsideReason && isSafeBashChain(analysis.commands, command)) {
+        return undefined;
+      }
       const gate = bashGate(action, analysis.outsideReason, modeSandbox(m).enabled, sandbox.ready);
       if (gate.kind === "block") return { block: true, reason: gate.reason };
       if (gate.kind === "prompt") {
+        if (trustAll) {
+          // Bypass: auto-approve; escapes run unsandboxed.
+          if (gate.onApproveUnsandboxed) approvedUnsandboxed.add(event.toolCallId);
+          return undefined;
+        }
         // Session approvals are keyed on the extracted command names, and ALL
         // names in a chain must be granted for it to pass silently - "allow git
         // this session" must not cover `git status && curl ... | sh`. Granting

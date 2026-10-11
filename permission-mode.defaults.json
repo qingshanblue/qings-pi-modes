@@ -1,12 +1,12 @@
 {
   "$schema": "./schemas/permission-mode.schema.json",
-  "defaultMode": "default",
+  "defaultMode": "ask",
   "cycleOrder": [
-    "default",
+    "ask",
     "plan",
-    "build",
-    "automode",
-    "yolo"
+    "auto",
+    "edits",
+    "bypass"
   ],
   "sandbox": {
     "enabled": true,
@@ -46,8 +46,8 @@
     }
   },
   "modes": {
-    "default": {
-      "label": "Default",
+    "ask": {
+      "label": "Ask",
       "color": "muted",
       "permission": {
         "path": {
@@ -100,29 +100,7 @@
       },
       "sandboxPin": "ro"
     },
-    "build": {
-      "label": "Build",
-      "color": "accent",
-      "permission": {
-        "path": {
-          "*": "allow"
-        },
-        "external_directory": "ask",
-        "read": "allow",
-        "grep": "allow",
-        "find": "allow",
-        "ls": "allow",
-        "write": "allow",
-        "edit": "allow",
-        "bash": {
-          "*": "allow"
-        },
-        "web_search": "allow",
-        "tool": "allow",
-        "skill": "allow"
-      }
-    },
-    "automode": {
+    "auto": {
       "label": "Auto",
       "color": "warning",
       "classifier": true,
@@ -146,8 +124,30 @@
         "skill": "ask"
       }
     },
-    "yolo": {
-      "label": "YOLO",
+    "edits": {
+      "label": "Edits",
+      "color": "accent",
+      "permission": {
+        "path": {
+          "*": "allow"
+        },
+        "external_directory": "ask",
+        "read": "allow",
+        "grep": "allow",
+        "find": "allow",
+        "ls": "allow",
+        "write": "allow",
+        "edit": "allow",
+        "bash": {
+          "*": "ask"
+        },
+        "web_search": "ask",
+        "tool": "ask",
+        "skill": "ask"
+      }
+    },
+    "bypass": {
+      "label": "Bypass",
       "color": "error",
       "bypassProtectedPaths": true,
       "permission": {
@@ -167,8 +167,7 @@
         "web_search": "allow",
         "tool": "allow",
         "skill": "allow"
-      },
-      "sandboxPin": "off"
+      }
     }
   }
 }
