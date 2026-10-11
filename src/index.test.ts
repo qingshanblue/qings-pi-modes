@@ -267,7 +267,7 @@ test("default mode: reads free, writes prompt, protected paths hard-block", { sk
   const h = await setup();
   try {
     // Footer: mode label + shortcut hints + network state (open here: --no-sandbox).
-    assert.match(h.ctx.status, /^Ask \u26a0$/);
+    assert.match(h.ctx.status, /^Ask · sandbox:unavailable$/);
 
     // Reads pass silently.
     assert.equal(await h.call("read", { path: "src/app.ts" }), undefined);
@@ -1322,7 +1322,7 @@ test("automode: an allowed ask runs without prompting; status shows the classifi
   const h = await setup({ permFlag: "auto", modelRegistry: registry, model: { id: "m", provider: "p" } });
   try {
     assert.match(h.ctx.status, /^Auto /);
-    assert.match(h.ctx.status, /\u273b/);
+    assert.match(h.ctx.status, /AI:m/);
     const res = await h.call("write", { path: "src/app.ts", content: "x" });
     assert.equal(res, undefined); // allowed, not blocked
     assert.equal(h.ctx.prompts.length, 0); // never asked the human

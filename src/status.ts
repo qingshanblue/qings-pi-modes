@@ -1,15 +1,15 @@
 /**
  * Footer status indicator rendering for the current permission mode.
  *
- * Two formats: **compact** (default) is a short glyph line
- * `Ask ⛨ ▣ ✻`; **verbose** keeps the spelled-out form. The mode label is
- * always shown, colored by the mode.
+ * Two formats: **compact** (default) is a short, readable token line
+ * `Ask · sandbox:on · net:filtered · AI:haiku`; **verbose** keeps the
+ * fully-spelled-out form. The mode label is always shown, colored by the mode.
  *
- * Glyphs (compact):
- *   mode      the mode label (colored)
- *   sandbox   ⛨ on (project-writable) · ⛨r read-only · ∅ off · ⚠ unavailable
- *   network   ▣ filtered · ∞ open          (only when the sandbox is enforcing)
- *   ✻         the AI classifier is active   (only in classifier modes)
+ * Tokens (compact):
+ *   mode                                             the mode label (colored)
+ *   sandbox:on | read-only | off | unavailable
+ *   net:filtered | open   (only while the sandbox is enforcing a network allowlist)
+ *   AI:<model>            (only in classifier modes)
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -34,10 +34,12 @@ export function updateStatus(
   const degraded = sb.enabled && !!sandbox.warn && !sandbox.disabled;
 
   if (compact) {
-    const sandboxGlyph = !sb.enabled ? "∅" : !enforcing ? "⚠" : sb.writable ? "⛨" : "⛨r";
-    let status = t.fg(mode.color, mode.label) + " " + t.fg(enforcing ? "success" : "dim", sandboxGlyph);
-    if (netEnabled) status += " " + (networkOpen ? t.fg("warning", "∞") : t.fg("success", "▣"));
-    if (mode.classifier && classifierLabel) status += " " + t.fg(mode.color, "✻");
+    const sbx = !sb.enabled ? "off" : !enforcing ? "unavailable" : sb.writable ? "on" : "read-only";
+    const sep = t.fg("dim", " · ");
+    let status = t.fg(mode.color, mode.label);
+    status += sep + t.fg(enforcing ? "success" : sb.enabled ? "warning" : "dim", `sandbox:${sbx}`);
+    if (netEnabled) status += sep + (networkOpen ? t.fg("warning", "net:open") : t.fg("success", "net:filtered"));
+    if (mode.classifier && classifierLabel) status += sep + t.fg(mode.color, classifierLabel);
     ctx.ui.setStatus("perm", status);
     return;
   }

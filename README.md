@@ -95,12 +95,14 @@ shown in the footer.
 
 Ask, Plan Mode, Auto, and Edits all run in-project `bash` inside the OS
 sandbox.
-The footer shows a **compact** status by default - the mode label plus glyphs,
-e.g. `Auto ⛨ ▣ ✻` (sandbox `⛨` on / `⛨r` read-only / `∅` off / `⚠` unavailable;
-network `▣` filtered / `∞` open; `✻` the AI classifier). Set
+The footer shows a **compact** status by default - the mode label plus readable
+machine-state tokens, e.g. `Auto · sandbox:on · net:filtered · AI:haiku`
+(`sandbox:on` project-writable / `sandbox:read-only` / `sandbox:off` /
+`sandbox:unavailable`; `net:filtered` / `net:open` only while the sandbox
+enforces an allowlist; `AI:<model>` only in the `auto` mode). Set
 `"statusFormat": "verbose"` in the global config for the spelled-out form
 (`Edits (sandboxed in project dir, alt+m)  Network: filtered (alt+n)`). The
-network glyph is green while the domain allowlist filters and orange when open
+network token is green while the domain allowlist filters and orange when open
 (see [Network](#network)). Bypass is decoupled from the sandbox too: `alt+s`
 decides whether it runs sandboxed. The label texts are plain; `alt+m` cycles in
 the order below. The table describes the **shipped defaults** - every mode is

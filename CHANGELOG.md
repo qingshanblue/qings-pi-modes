@@ -7,9 +7,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
-- **Compact footer by default.** The `perm` status is now a short glyph line
-  (`Auto ⛨ ▣ ✻`: mode · sandbox · network · classifier). Set
-  `"statusFormat": "verbose"` in the global config for the old spelled-out form.
+- **Compact footer by default.** The `perm` status is a short, readable token
+  line (`Auto · sandbox:on · net:filtered · AI:haiku`: mode · sandbox · network
+  · classifier). Set `"statusFormat": "verbose"` in the global config for the
+  old spelled-out form.
 - **CC-style mode set.** The shipped modes are renamed and re-scoped to
   `ask` / `plan` / `auto` / `edits` / `bypass` (cycle `ask → plan → auto → edits
   → bypass`): `edits` (= Claude Code's accept-edits) auto-approves project
