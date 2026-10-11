@@ -304,8 +304,9 @@ export default async function (pi: ExtensionAPI) {
 
   /**
    * Ask the AI classifier about a pending `ask`, falling back to the human
-   * prompt per its policy. Never lets the model authorize an unsandboxed run
-   * (`review.escalateToHuman`) — those always go to the human.
+   * prompt per its policy. The classifier judges EVERY ask — including commands
+   * that will run unsandboxed: `auto` means the AI is the gate, and the sandbox
+   * state (ctrl+s) is what bounds execution, independently of who approves.
    */
   const autoDecide = async (
     ctx: ExtensionContext,
@@ -327,8 +328,6 @@ export default async function (pi: ExtensionAPI) {
         onForever,
         denyAnd,
       );
-    // Never let the model authorize an unsandboxed run — the human approves those.
-    if (review.escalateToHuman) return humanPrompt();
     const cfg = normalizeClassifierConfig(config.classifier);
     if (!cfg.enabled) return humanPrompt();
     const targets = Array.isArray(target) ? target : [target];

@@ -1,7 +1,7 @@
 # 规划 v3（最终）：沙箱解耦 · CC 式模式 · 状态精简
 
 > 2026-10-11 · qings-pi-modes（fork of wynainfo/pi-permission-modes）
-> 决策已定：**CC 式模式**、保留 Plan、auto 补白名单、最高档命名 `bypass`。状态：**P1 进行中**。
+> 决策已定：**CC 式模式**、保留 Plan、auto 补白名单、最高档命名 `accept`。状态：**P1–P4 已实现**。
 
 ## 0. 最终模式集（CC 对齐）
 
