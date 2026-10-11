@@ -243,7 +243,10 @@ export const SANDBOX_RUNTIME_TMP_PATHS = ["/tmp/claude", "/private/tmp/claude"];
  * blocks writes itself, exactly as it does in-project.
  */
 export function sandboxAllowedRoots(root: string, profile: SandboxProfile): string[] {
-  if (!profile.enabled) return [];
+  // NOTE: intentionally independent of `profile.enabled` — the in-bounds set is
+  // what the POLICY layer considers "inside the project's writable roots", and
+  // must not change with the `ctrl+s` state (off = "work as usual", not "the
+  // session scratch dir suddenly counts as outside").
   const out: string[] = [];
   for (const raw of [...(profile.allowWrite ?? []), ...SANDBOX_RUNTIME_TMP_PATHS]) {
     if (/[*?[\]{}]/.test(raw)) continue;

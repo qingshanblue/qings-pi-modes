@@ -341,6 +341,7 @@ export default async function (pi: ExtensionAPI) {
       input: review.input,
       cwd: ctx.cwd ?? root,
       isOutside: review.isOutside,
+      recentUserRequest: lastUserRequest(ctx),
     };
     const key = subjectKey(subject, cfg.model);
     let verdict = classifierCache.get(key);
@@ -521,7 +522,6 @@ export default async function (pi: ExtensionAPI) {
     await sandbox.applyProfile(runtimeProfile(m)); // re-init runtime if the profile changed
     applyToolVisibility();
     updateStatus(ctx, m, sandbox, net.open);
-    ctx.ui.notify(`Permission mode: ${m.label}`, "info");
     if (persist) pi.appendEntry<PermState>("perm-mode", { mode: modeName });
     // B: a manual switch into the approve mode while a plan is pending (alt+m,
     // /perm <mode>). Not on session_start/resume (persist=false) and not for
@@ -746,12 +746,6 @@ export default async function (pi: ExtensionAPI) {
     }
     net.open = !net.open;
     updateStatus(ctx, currentMode(), sandbox, net.open);
-    ctx.ui.notify(
-      net.open
-        ? "Network: OPEN for this session — domain filtering disabled (alt+n or /net restrict to re-enable)"
-        : "Network: filtered — domain allowlist active",
-      net.open ? "warning" : "info",
-    );
   };
 
   pi.registerShortcut("ctrl+n", {
@@ -842,18 +836,35 @@ export default async function (pi: ExtensionAPI) {
     await sandbox.applyProfile(runtimeProfile(m)); // no-op when the effective profile is unchanged (a pinned mode)
     updateStatus(ctx, m, sandbox, net.open);
     if (persist) pi.appendEntry("perm-sandbox", { state });
-    const label =
-      state === "off"
-        ? "OFF (outside paths readable and writable; no OS confinement)"
-        : state === "strict"
-          ? "STRICT (outside paths blocked for read and write)"
-          : "ON (outside writes blocked, reads allowed)";
-    const pin = m.sandboxPin ? ` — note ${m.label} pins "${m.sandboxPin}", so this applies elsewhere / after leaving` : "";
-    ctx.ui.notify(`permission-mode: sandbox ${label}${pin}`, state === "off" ? "warning" : "info");
   };
   const cycleSandbox = async (ctx: ExtensionContext): Promise<void> => {
     const order: SandboxState[] = ["off", "on", "strict"];
     await setSandboxState(order[(order.indexOf(sessionSandboxState) + 1) % order.length], ctx);
+  };
+
+  /**
+   * The user's most recent message — the classifier's authorization context.
+   * Without it the reviewer only sees the raw action and over-denies legitimate
+   * work (it cannot tell an intended edit from a rogue one).
+   */
+  const lastUserRequest = (ctx: ExtensionContext): string | undefined => {
+    const entries = ctx.sessionManager.getBranch?.() ?? ctx.sessionManager.getEntries();
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const e = entries[i] as { type?: string; message?: { role?: string; content?: unknown } };
+      if (e?.type !== "message" || e.message?.role !== "user") continue;
+      const content = e.message.content;
+      let text = "";
+      if (typeof content === "string") {
+        text = content;
+      } else if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block && typeof block === "object" && "text" in block) text += String((block as { text?: unknown }).text ?? "");
+        }
+      }
+      const cleaned = text.replace(/\s+/g, " ").trim();
+      return cleaned || undefined;
+    }
+    return undefined;
   };
 
   pi.registerCommand("sandbox", {

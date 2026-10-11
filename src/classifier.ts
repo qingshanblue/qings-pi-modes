@@ -96,6 +96,9 @@ export interface ClassifierSubject {
   input: unknown;
   cwd: string;
   isOutside?: boolean;
+  /** The user's most recent request — the authorization context. Without it the
+   * reviewer cannot tell a legitimate edit from a rogue one and over-denies. */
+  recentUserRequest?: string;
 }
 
 const SYSTEM_PROMPT = [
@@ -112,7 +115,8 @@ const SYSTEM_PROMPT = [
   "- pipes remote content into a shell (`curl … | sh`), or runs untrusted code;",
   "- is destructive, irreversible, or clearly unrelated to the user's request.",
   "",
-  "Allow routine, reversible, in-project work that matches the user's goal.",
+  "Allow routine, reversible, in-project work that matches the user's request —",
+  "the pending action is shown together with that request; an action that clearly\n  serves it should be allowed even if it edits project files.",
   "When you are unsure, deny — a human can still approve it.",
   "",
   "Respond with ONLY a JSON object, no prose and no code fences:",
@@ -140,6 +144,7 @@ export function buildReviewPrompt(subject: ClassifierSubject, maxInputChars = DE
     `outside project: ${subject.isOutside ? "yes" : "no"}`,
   ];
   if (subject.targets.length > 0) lines.push(`targets: ${subject.targets.join(", ")}`);
+  if (subject.recentUserRequest) lines.push(`user's latest request: ${subject.recentUserRequest}`);
   lines.push("action input:", boundedInput(subject.input, maxInputChars));
   return { systemPrompt: SYSTEM_PROMPT, content: lines.join("\n") };
 }

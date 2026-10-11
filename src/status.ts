@@ -35,9 +35,12 @@ export function updateStatus(
 
   if (compact) {
     const sbx = !sb.enabled ? "off" : !enforcing ? "unavailable" : sb.writable ? "on" : "read-only";
+    // Colors carry the meaning: green = default boundary, red = no boundary,
+    // accent = the hard boundary, warning = the sandbox could not start.
+    const sbColor = !sb.enabled ? "error" : !enforcing ? "warning" : sb.writable ? "success" : "accent";
     const sep = t.fg("dim", " · ");
     let status = t.fg(mode.color, mode.label);
-    status += sep + t.fg(enforcing ? "success" : sb.enabled ? "warning" : "dim", `sandbox:${sbx}`);
+    status += sep + t.fg(sbColor, `sandbox:${sbx}`);
     if (netEnabled) status += sep + (networkOpen ? t.fg("warning", "net:open") : t.fg("success", "net:filtered"));
     if (mode.classifier && classifierLabel) status += sep + t.fg(mode.color, classifierLabel);
     ctx.ui.setStatus("perm", status);

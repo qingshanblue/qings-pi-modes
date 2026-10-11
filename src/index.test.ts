@@ -884,7 +884,7 @@ test("a hostile project config cannot take the session down: global layer applie
     writeFileSync(path.join(piDir, "permission-mode.json"), '{"modes":{"ask":null,"__proto__":{"sandbox":{"allowWrite":5}}}}');
     h.ctx.notices.length = 0;
     await h.pi.emit("session_start", {}, h.ctx);
-    assert.ok(h.ctx.notices.some((n) => /Permission mode: Ask/.test(n)), "session start completed (setMode ran)");
+    assert.match(h.ctx.status, /^Ask /); // session start completed (setMode ran)
     assert.ok(h.ctx.notices.some((n) => /project mode "ask" must be an object/.test(n)));
     const denied = await h.call("read", { path: "key.pem" });
     assert.equal(denied?.block, true, "the global layer is still in force");
@@ -1420,17 +1420,14 @@ test("sandbox: ctrl+s cycles off/on/strict and /sandbox sets it", { skip }, asyn
   try {
     const ctrlS = h.pi.shortcuts.get("ctrl+s")!;
     await ctrlS(h.ctx); // on → strict
-    assert.match(h.ctx.notices.at(-1) ?? "", /sandbox STRICT/);
     assert.deepEqual(h.pi.entries.at(-1), { customType: "perm-sandbox", data: { state: "strict" } });
     await ctrlS(h.ctx); // strict → off
-    assert.match(h.ctx.notices.at(-1) ?? "", /sandbox OFF/);
+    assert.deepEqual(h.pi.entries.at(-1), { customType: "perm-sandbox", data: { state: "off" } });
     await ctrlS(h.ctx); // off → on
-    assert.match(h.ctx.notices.at(-1) ?? "", /sandbox ON/);
+    assert.deepEqual(h.pi.entries.at(-1), { customType: "perm-sandbox", data: { state: "on" } });
     // Direct set via the command.
-    h.ctx.notices.length = 0;
     await h.pi.commands.get("sandbox")!("off", h.ctx);
-    assert.match(h.ctx.notices.at(-1) ?? "", /sandbox OFF/);
-    h.ctx.notices.length = 0;
+    assert.deepEqual(h.pi.entries.at(-1), { customType: "perm-sandbox", data: { state: "off" } });
     await h.pi.commands.get("sandbox")!("bogus", h.ctx);
     assert.match(h.ctx.notices.at(-1) ?? "", /usage: \/sandbox/);
   } finally {
@@ -1438,7 +1435,7 @@ test("sandbox: ctrl+s cycles off/on/strict and /sandbox sets it", { skip }, asyn
   }
 });
 
-test("sandbox: a pinned mode overrides ctrl+s", { skip }, async () => {
+test("sandbox: a pinned mode overrides ctrl+s, and the state outlives the mode", { skip }, async () => {
   const h = await setup();
   try {
     const dir = path.join(h.agentDir, "permission-mode");
@@ -1449,14 +1446,27 @@ test("sandbox: a pinned mode overrides ctrl+s", { skip }, async () => {
     );
     await h.pi.emit("session_start", {}, h.ctx);
     await h.perm("locked");
-    h.ctx.notices.length = 0;
-    await h.pi.shortcuts.get("ctrl+s")!(h.ctx);
-    assert.match(h.ctx.notices.join("\n"), /Locked pins "strict"/);
+    await h.pi.shortcuts.get("ctrl+s")!(h.ctx); // session: on → strict
+    assert.deepEqual(h.pi.entries.at(-1), { customType: "perm-sandbox", data: { state: "strict" } });
+    // Strict: an out-of-project command is blocked outright, no prompt.
+    const sealed = await h.call("bash", { command: "cat /etc/hostname" });
+    assert.equal(sealed?.block, true);
+    assert.match(sealed?.reason ?? "", /Sandbox strict: outside-project access is blocked/);
+
+    // The sandbox state is MODE-INDEPENDENT: switching to `ask` keeps `strict`.
     await h.perm("ask");
-    h.ctx.notices.length = 0;
+    const still = await h.call("bash", { command: "cat /etc/hostname" });
+    assert.equal(still?.block, true);
+    assert.match(still?.reason ?? "", /Sandbox strict/);
+
+    // ctrl+s (strict → off): the boundary opens for every mode.
     await h.pi.shortcuts.get("ctrl+s")!(h.ctx);
-    assert.match(h.ctx.notices.join("\n"), /sandbox/);
-    assert.doesNotMatch(h.ctx.notices.join("\n"), /pins/);
+    assert.deepEqual(h.pi.entries.at(-1), { customType: "perm-sandbox", data: { state: "off" } });
+    h.ctx.answers.push("Deny");
+    const opened = await h.call("bash", { command: "cat /etc/hostname" });
+    assert.equal(opened?.block, true);
+    assert.doesNotMatch(opened?.reason ?? "", /Sandbox strict/); // now it is the escape prompt, not the boundary
+    assert.equal(h.ctx.prompts.length, 1);
   } finally {
     h.cleanup();
   }

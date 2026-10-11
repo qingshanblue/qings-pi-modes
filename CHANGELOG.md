@@ -7,6 +7,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
+- **The classifier now sees the user's latest request.** It previously judged
+  the raw action alone and over-denied legitimate work (e.g. editing the
+  extension's own tests); the pending action is now reviewed together with the
+  most recent user message (truncated).
+- **The in-bounds set no longer depends on the sandbox state.** With the sandbox
+  `off`, the session scratch dir and `/tmp/pi` stay in-bounds for the file tools
+  (previously they turned into "outside" and every scratch write was gated).
+- **Switching no longer prints a notice above the editor** — the footer chip is
+  the single source of truth, and its sandbox token is color-coded per state
+  (off = red, on = green, strict = accent, unavailable = warning).
 - **The sandbox is reduced to the project boundary, with three hardness levels**
   (`ctrl+s`): `off` (no OS confinement) / `on` (outside writes blocked, reads
   allowed) / `strict` (outside read AND write blocked at the policy layer). The
