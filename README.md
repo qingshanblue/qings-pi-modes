@@ -95,13 +95,17 @@ shown in the footer.
 
 Ask, Plan Mode, Auto, and Edits all run in-project `bash` inside the OS
 sandbox.
-The footer always shows the mode, the network state, and their shortcuts -
-e.g. `Edits (sandboxed in project dir, alt+m)  Network: filtered (alt+n)` -
-with the network chip green while the domain allowlist filters and orange when
-open (see [Network](#network)). Bypass is decoupled from the sandbox too: `alt+s` decides whether it runs sandboxed. Labels are plain text
-(no icons); `alt+m` cycles in the order below. The table describes the **shipped defaults** - every mode is data and can
-be retuned, and you can add your own, in `permission-mode.json` (see
-[Configuration](#configuration)).
+The footer shows a **compact** status by default - the mode label plus glyphs,
+e.g. `Auto ⛨ ▣ ✻` (sandbox `⛨` on / `⛨r` read-only / `∅` off / `⚠` unavailable;
+network `▣` filtered / `∞` open; `✻` the AI classifier). Set
+`"statusFormat": "verbose"` in the global config for the spelled-out form
+(`Edits (sandboxed in project dir, alt+m)  Network: filtered (alt+n)`). The
+network glyph is green while the domain allowlist filters and orange when open
+(see [Network](#network)). Bypass is decoupled from the sandbox too: `alt+s`
+decides whether it runs sandboxed. The label texts are plain; `alt+m` cycles in
+the order below. The table describes the **shipped defaults** - every mode is
+data and can be retuned, and you can add your own, in `permission-mode.json`
+(see [Configuration](#configuration)).
 
 | Mode | Behavior |
 |------|----------|
@@ -474,6 +478,7 @@ Modes are data, layered in this order:
     "network": { "allowedDomains": ["github.com", "*.github.com"], "deniedDomains": [] },
     "askOnBlockedHost": true          // live prompt for hosts outside the allowlist (false = silent deny)
   },
+  "statusFormat": "compact",            // footer verbosity: "compact" (default) or "verbose"
   "classifier": {                       // AI safety classifier for modes with "classifier": true
     "model": "current",                 // "current" = the active session model; else "provider/model"
     "timeoutMs": 15000,
