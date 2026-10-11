@@ -14,29 +14,59 @@ const ctx = () => {
 };
 const mode = (sandbox: ModeDef["sandbox"]): ModeDef => ({ label: "Build", color: "accent", sandbox, permission: {} });
 
-test("updateStatus: filtered / open / unrestricted / degraded", () => {
+test("updateStatus (verbose): filtered / open / unrestricted / degraded", () => {
   const ready = { ready: true, warn: undefined, disabled: false };
   let c = ctx();
-  updateStatus(c as never, mode({ enabled: true, writable: true, network: { allowedDomains: ["a.com"] } }), ready, false);
+  updateStatus(c as never, mode({ enabled: true, writable: true, network: { allowedDomains: ["a.com"] } }), ready, false, undefined, false);
   assert.equal(c.status, "Build (sandboxed in project dir, alt+m)  Network: filtered (alt+n)");
   c = ctx();
-  updateStatus(c as never, mode({ enabled: true, writable: true, network: { allowedDomains: [] } }), ready, true);
+  updateStatus(c as never, mode({ enabled: true, writable: true, network: { allowedDomains: [] } }), ready, true, undefined, false);
   assert.equal(c.status, "Build (sandboxed in project dir, alt+m)  Network: open (alt+n)");
   // No allowlist configured: the runtime does not filter, and the chip must not claim it does.
   c = ctx();
-  updateStatus(c as never, mode({ enabled: true, writable: true }), ready, false);
+  updateStatus(c as never, mode({ enabled: true, writable: true }), ready, false, undefined, false);
   assert.equal(c.status, "Build (sandboxed in project dir, alt+m)  Network: unrestricted");
   c = ctx();
-  updateStatus(c as never, mode({ enabled: true, writable: true, network: { allowedDomains: ["a.com"] } }), { ready: false, warn: "sandbox init failed", disabled: false }, false);
+  updateStatus(c as never, mode({ enabled: true, writable: true, network: { allowedDomains: ["a.com"] } }), { ready: false, warn: "sandbox init failed", disabled: false }, false, undefined, false);
   assert.equal(c.status, "Build (alt+m) (!) sandbox init failed  Network: open");
 });
 
-test("updateStatus: the classifier chip only appears in classifier modes", () => {
+test("updateStatus (compact, default): mode + sandbox/network/classifier glyphs", () => {
   const ready = { ready: true, warn: undefined, disabled: false };
+  const sbOnFiltered = { enabled: true, writable: true, network: { allowedDomains: ["a.com"] } };
+  // sandbox on + filtered network + classifier
   let c = ctx();
-  updateStatus(c as never, { ...mode({ enabled: true, writable: true }), classifier: true }, ready, false, "AI:m");
-  assert.match(c.status, /AI:m/);
+  updateStatus(c as never, { ...mode(sbOnFiltered), classifier: true }, ready, false, "AI:m");
+  assert.equal(c.status, "Build ⛨ ▣ ✻");
+  // network open
   c = ctx();
-  updateStatus(c as never, mode({ enabled: true, writable: true }), ready, false, "AI:m");
-  assert.ok(!/AI:m/.test(c.status), "no chip outside classifier modes");
+  updateStatus(c as never, mode(sbOnFiltered), ready, true, undefined);
+  assert.equal(c.status, "Build ⛨ ∞");
+  // read-only sandbox
+  c = ctx();
+  updateStatus(c as never, mode({ enabled: true, writable: false, network: { allowedDomains: ["a.com"] } }), ready, false, undefined);
+  assert.equal(c.status, "Build ⛨r ▣");
+  // no allowlist → no network glyph
+  c = ctx();
+  updateStatus(c as never, mode({ enabled: true, writable: true }), ready, false, undefined);
+  assert.equal(c.status, "Build ⛨");
+  // sandbox off
+  c = ctx();
+  updateStatus(c as never, mode({ enabled: false, writable: true }), ready, false, undefined);
+  assert.equal(c.status, "Build ∅");
+  // sandbox unavailable (degraded)
+  c = ctx();
+  updateStatus(c as never, mode(sbOnFiltered), { ready: false, warn: "nope", disabled: false }, false, undefined);
+  assert.equal(c.status, "Build ⚠");
+});
+
+test("updateStatus: the classifier ✻ only appears in classifier modes", () => {
+  const ready = { ready: true, warn: undefined, disabled: false };
+  const sb = { enabled: true, writable: true };
+  let c = ctx();
+  updateStatus(c as never, { ...mode(sb), classifier: true }, ready, false, "AI:m");
+  assert.match(c.status, /✻/);
+  c = ctx();
+  updateStatus(c as never, mode(sb), ready, false, "AI:m");
+  assert.ok(!/✻/.test(c.status), "no ✻ outside classifier modes");
 });

@@ -377,6 +377,7 @@ function mergeGlobal(base: PermissionModeConfig, over: Partial<PermissionModeCon
     const patch = sanitizeSandbox(over.sandbox, "global sandbox", onError);
     sandbox = { ...(base.sandbox ?? {}), ...patch } as SandboxProfile;
   }
+  const statusFormat = over.statusFormat === "verbose" || over.statusFormat === "compact" ? over.statusFormat : base.statusFormat;
   return {
     defaultMode,
     cycleOrder,
@@ -384,6 +385,7 @@ function mergeGlobal(base: PermissionModeConfig, over: Partial<PermissionModeCon
     ...(sandbox ? { sandbox } : {}),
     ...(plan ? { plan } : {}),
     ...(mergedClassifier ? { classifier: mergedClassifier } : {}),
+    ...(statusFormat ? { statusFormat } : {}),
   };
 }
 

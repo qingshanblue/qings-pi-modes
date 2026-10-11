@@ -267,7 +267,7 @@ test("default mode: reads free, writes prompt, protected paths hard-block", { sk
   const h = await setup();
   try {
     // Footer: mode label + shortcut hints + network state (open here: --no-sandbox).
-    assert.match(h.ctx.status, /^Ask \(alt\+m\)  Network: open$/);
+    assert.match(h.ctx.status, /^Ask \u26a0$/);
 
     // Reads pass silently.
     assert.equal(await h.call("read", { path: "src/app.ts" }), undefined);
@@ -1318,12 +1318,11 @@ function classifierRegistry(reply: () => unknown) {
 const allowReply = () => ({ content: [{ type: "text", text: '{"allow":true,"risk":"low","reason":"ok"}' }] });
 const denyReply = () => ({ content: [{ type: "text", text: '{"allow":false,"risk":"high","reason":"secret access"}' }] });
 
-test("automode: an allowed ask runs without prompting; status shows the classifier", { skip }, async () => {
-  const registry = classifierRegistry(allowReply);
+test("automode: an allowed ask runs without prompting; status shows the classifier", { skip }, async () => {  const registry = classifierRegistry(allowReply);
   const h = await setup({ permFlag: "auto", modelRegistry: registry, model: { id: "m", provider: "p" } });
   try {
     assert.match(h.ctx.status, /^Auto /);
-    assert.match(h.ctx.status, /AI:m/);
+    assert.match(h.ctx.status, /\u273b/);
     const res = await h.call("write", { path: "src/app.ts", content: "x" });
     assert.equal(res, undefined); // allowed, not blocked
     assert.equal(h.ctx.prompts.length, 0); // never asked the human

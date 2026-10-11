@@ -176,6 +176,8 @@ export interface PermissionModeConfig {
    * project must not be able to point the reviewer at a weaker model.
    */
   classifier?: Partial<ClassifierConfig>;
+  /** Footer status verbosity: "compact" (default) or "verbose". Global config only. */
+  statusFormat?: "compact" | "verbose";
 }
 
 /** Sentinel a mode's `systemPrompt` can use to request the Plan-mode prompt. */

@@ -248,7 +248,15 @@ export default async function (pi: ExtensionAPI) {
     m: ModeDef,
     sandboxState: Parameters<typeof renderStatus>[2],
     networkOpen: boolean,
-  ): void => renderStatus(ctx, { ...m, sandbox: effectiveSandbox(m) }, sandboxState, networkOpen, classifierChip(ctx, m));
+  ): void =>
+    renderStatus(
+      ctx,
+      { ...m, sandbox: effectiveSandbox(m) },
+      sandboxState,
+      networkOpen,
+      classifierChip(ctx, m),
+      (config.statusFormat ?? "compact") === "compact",
+    );
   // One-step plan approval (plan-approval.ts): the plan show_plan rendered
   // last is offered for approval when the agent goes idle (A), confirmed on a
   // manual switch into the approve mode (B), and taken by /plan approve (C).
