@@ -93,11 +93,11 @@ Cycle with **`ctrl+q`** (or `alt+m`) or set directly with **`/perm <mode>**`. Th
 is persisted per session (survives `/reload`, resume, and branch navigation) and
 shown in the footer.
 
-Ask, Plan Mode, Auto, and Edits all run in-project `bash` inside the OS
+Ask, Plan Mode, Edits, and Auto all run in-project `bash` inside the OS
 sandbox.
 The footer shows a **compact** status by default - the mode label plus readable
 machine-state tokens, e.g. `Auto · sandbox:on · net:filtered · AI:haiku`
-(`sandbox:on` project-writable / `sandbox:read-only` / `sandbox:off` /
+(`sandbox:on` project-writable / `sandbox:strict` outside blocked for read and write / `sandbox:off` /
 `sandbox:unavailable`; `net:filtered` / `net:open` only while the sandbox
 enforces an allowlist; `AI:<model>` only in the `auto` mode). Set
 `"statusFormat": "verbose"` in the global config for the spelled-out form
@@ -112,7 +112,7 @@ data and can be retuned, and you can add your own, in `permission-mode.json`
 | Mode | Behavior |
 |------|----------|
 | **Ask** | Confirm every `bash`/`edit`/`write`; reads are free. Approved **in-project** `bash` runs **sandboxed** (writes confined to the project). A read-only command on the whitelist runs without a prompt. |
-| **Plan Mode** | Planning mode. Reads are free; in-project `bash` runs **sandboxed read-only** (writes/deletes fail), so only read commands effectively work. The one mutation allowed without confirmation is **creating/editing Markdown** (`*.md`/`*.markdown`) inside the project - other `edit`/`write` are blocked. A system-prompt addition steers the model: for a planning task, write the plan to `plan/<YYYY-MM-DD>_<description>.md`, render it for review with the **`show_plan`** tool, then hand over to you: an **Accept / Decline** prompt follows the plan (see [Approving a plan](#approving-a-plan)). |
+| **Plan Mode** | Planning mode. Reads are free; only **Markdown** (`*.md`/`*.markdown`) can be created or **edited** inside the project - other `edit`/`write` are blocked. Mutating `bash` is **asked** (read-only commands on the whitelist run without a prompt). A system-prompt addition steers the model: for a planning task, write the plan to `plan/<YYYY-MM-DD>_<description>.md`, render it for review with the **`show_plan`** tool, then hand over to you: an **Accept / Decline** prompt follows the plan (see [Approving a plan](#approving-a-plan)). |
 | **Edits** | Project-internal `edit`/`write` run with no confirmation (like Claude Code's accept-edits); `bash` still asks. In-project `bash` runs **sandboxed**. |
 | **Auto** | Reads are free; `bash`/`edit`/`write`, out-of-project access, web search, and extension tools are judged by the **AI safety classifier** instead of prompting you (see [AI automode](#ai-automode)). Runs **sandboxed**; an action that would run unsandboxed (an escape, privilege escalation, or a degraded sandbox) still goes to a human. |
 | **Accept** | Never prompts (auto-accepts every policy decision) — but it is **still bounded by the sandbox**: `ctrl+s` decides what it can reach. No protected-path backstop. |
@@ -262,8 +262,9 @@ Sandbox-wise, all pi sessions on the host share the `/tmp/pi` base (it is in
 the shipped `allowWrite`; the base is created sticky and world-writable like
 `/tmp`, each session folder is `0700`). Instruction-wise, each session is told
 to use only its own folder - including Accept, which never prompts but still
-gets a short "scratch directory" pointer. Plan mode blocks mutating bash, so it can't
-write there (like everywhere else), so it isn't advertised there.
+gets a short "scratch directory" pointer. Plan mode gates mutating bash, so it
+can't write there from bash (like everywhere else) - but the pointer is still
+advertised, because the Write/Edit tools may use it.
 
 Nothing is deleted at shutdown - `/reload` and session resume find their files
 again (the folder is keyed on pi's session id). Instead, at every session start,

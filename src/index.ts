@@ -882,7 +882,7 @@ export default async function (pi: ExtensionAPI) {
       const c = profileToConfig(effectiveSandbox(m));
       ctx.ui.notify(
         [
-          `Sandbox: ACTIVE for ${m.label} (${sb.writable ? "project-writable" : "read-only"})`,
+          `Sandbox: ACTIVE for ${m.label} (state: ${effectiveSandboxState(m)})`,
           "",
           `Scratch dir: ${scratchDir ?? "(none)"}`,
           `Network: ${net.open ? "OPEN for this session (alt+n)" : "filtered (alt+n)"}`,
@@ -918,7 +918,7 @@ export default async function (pi: ExtensionAPI) {
       const approved = approvedUnsandboxed.delete(id); // user granted an escape
       const m = currentMode();
       const sb = modeSandbox(m);
-      const plan = bashExecPlan(sb.enabled, sb.writable, sandbox.ready, approved);
+      const plan = bashExecPlan(sb.enabled, true, sandbox.ready, approved); // boundary-only: the sandbox never makes bash read-only
       if (sb.enabled && !approved && !plan.sandboxed) {
         // The gate allowed this call because the sandbox was ready; it isn't
         // any more (a failed profile switch, a re-init in flight). Never
@@ -1181,6 +1181,7 @@ export default async function (pi: ExtensionAPI) {
       networkOpen: net.open,
       sessionDomains: net.grants(),
       scratchDir,
+      strict: effectiveSandboxState(m) === "strict",
     });
     if (aware) parts.push(aware);
     const sp = m.systemPrompt;

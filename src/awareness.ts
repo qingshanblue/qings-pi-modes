@@ -52,9 +52,12 @@ const renderWritePath = (p: string): string => (p === "." || p === "./" ? "the p
  * unsandboxed mode WITH a scratch directory gets a short section naming it:
  * keeping temp files per session is worth it even when nothing confines bash.
  */
-export function sandboxAwarenessPrompt(mode: ModeDef, opts: AwarenessOptions): string | undefined {
+export function sandboxAwarenessPrompt(
+  mode: ModeDef,
+  opts: AwarenessOptions & { strict?: boolean },
+): string | undefined {
   if (mode.injectSandboxInfo === false) return undefined;
-  const sb: SandboxProfile = mode.sandbox ?? { enabled: false, writable: true };
+  const sb: SandboxProfile = mode.sandbox ?? { enabled: true, writable: true };
   if (!sb.enabled) {
     if (!opts.scratchDir) return undefined;
     return [`## Scratch directory (${mode.label})`, "", `Bash runs unsandboxed in this mode. ${scratchSentence(opts.scratchDir)}`].join("\n");
@@ -74,20 +77,18 @@ export function sandboxAwarenessPrompt(mode: ModeDef, opts: AwarenessOptions): s
     return lines.join("\n");
   }
 
-  const lines = [header, "", "Bash runs inside an OS-level sandbox with these boundaries:", ""];
-
-  if (!sb.writable) {
+  const lines = [header, "", "Bash runs inside an OS-level sandbox whose job is the project boundary:", ""];
+  if (opts.strict) {
     lines.push(
-      "- Bash is READ-ONLY: filesystem writes from bash fail regardless of path (no mkdir, no redirects, no installs). Use the Write/Edit tools for the file changes this mode permits.",
+      `- SANDBOX STRICT: paths outside the project are BLOCKED for read and write — the dispatcher rejects any out-of-project access outright (no prompt). Stay inside the project.`,
     );
-  } else {
-    // The scratch dir gets its own bullet below; don't list it twice.
-    const writable = (sb.allowWrite ?? []).filter((p) => p !== opts.scratchDir).map(renderWritePath);
-    lines.push(
-      `- Writable paths: ${writable.join(", ") || "(none)"}. Use them for installs and build output (./node_modules, an in-project venv).`,
-    );
-    if (opts.scratchDir) lines.push(`- ${scratchSentence(opts.scratchDir)}`);
   }
+  // The scratch dir gets its own bullet below; don't list it twice.
+  const writable = (sb.allowWrite ?? []).filter((p) => p !== opts.scratchDir).map(renderWritePath);
+  lines.push(
+    `- Writable paths: ${writable.join(", ") || "(none)"}. Use them for installs and build output (./node_modules, an in-project venv).`,
+  );
+  if (opts.scratchDir) lines.push(`- ${scratchSentence(opts.scratchDir)}`);
   if (sb.denyWrite?.length) {
     lines.push(`- Additionally write-denied: ${sb.denyWrite.join(", ")}.`);
   }

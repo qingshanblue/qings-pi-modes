@@ -1,73 +1,84 @@
-# 规划 v3（最终）：沙箱解耦 · CC 式模式 · 状态精简
+# 规划 v4（最终）：沙箱解耦 · CC 式模式 · 状态精简
 
 > 2026-10-11 · qings-pi-modes（fork of wynainfo/pi-permission-modes）
-> 决策已定：**CC 式模式**、保留 Plan、auto 补白名单、最高档命名 `accept`。状态：**P1–P4 已实现**。
+> 状态：**已实现**（P1–P4，分支 `feat/sandbox-decouple`）
 
-## 0. 最终模式集（CC 对齐）
+## 0. 最终形态：三条正交轴
 
-| 模式 | CC 对应 | 读 | 项目内 write/edit | 项目内 bash | 越界/保护路径 | 门 |
-|---|---|---|---|---|---|---|
-| **ask** | default | allow | 人工 | 人工 | 人工 / 硬拦 | 人工 |
-| **edits** | acceptEdits | allow | **自动** | 人工 | 人工 / 硬拦 | 人工(部分) |
-| **auto** | auto mode | allow | 白名单/规则→放行，否则 **AI** | 白名单→放行，否则 **AI** | 文件→AI；bash 逃逸→人工 | AI |
-| **bypass** | bypassPermissions | allow | 自动 | 自动 | **放行 / 不拦** | 无 |
-| **plan** | plan | allow | 仅 `*.md` | 允许（**pin ro** 保证只读） | 人工 / 硬拦 | 人工(部分) |
+| 轴 | 快捷键 | 取值 | 职责 |
+|---|---|---|---|
+| **审批模式** | `ctrl+q`（`alt+m` 别名）| `plan → ask → edits → auto → accept`（按权限从低到高）| 谁批准 `ask`：人工 / AI / 自动 |
+| **沙箱边界** | `ctrl+s`（`alt+s` 别名）| `off / on / strict` | **只管项目边界**：外路径的读写 |
+| **网络** | `ctrl+n`（`alt+n` 别名）| `net:filtered ⇄ net:open` | 域名过滤（独立轴）|
 
-- 循环：`ask → plan → auto → edits → bypass`（Restrictive → Permissive，可配）。
-- `bypass` = **免审批**，但沙箱由 `alt+s` **独立**生效（"旧 YOLO" = `bypass` + `alt+s off`）。
+切换**不输出任何通知**——footer 状态条是唯一事实来源。
 
-## 1. 两条正交轴
+## 1. 沙箱：只管项目边界（三态）
 
-- **审批模式**（`alt+m` / `/perm <mode>`）：只描述「谁批准 ask」+ 系统提示 + 工具可见性。
-- **沙箱状态**（`alt+s` / `/sandbox off|on|ro`）：`off` / `on`(项目可写) / `ro`(只读)。
-- 网络过滤属于沙箱 profile；`alt+n` 保留。
+| 档 | 外路径读 | 外路径写 | 项目内 | 越界处理 |
+|---|---|---|---|---|
+| **off** | ✅ | ✅ | 原样 | 不检测（策略层说了算）|
+| **on**（默认）| ✅ | ⛔ OS 拦 | 原样 | 弹窗（批准后非沙箱执行）|
+| **strict** | ⛔ | ⛔ | 原样 | **直接 block**，不弹窗 |
 
-## 2. 沙箱解耦
+- **实现说明**：`strict` 的"外读也拦"走**策略层**（dispatcher 对越界访问直接 block）——bubblewrap 必须让 bash 读系统库，OS 层无法遮蔽全部外读。
+- `off` 时**不改变** in-bounds 集合：scratch 与 `/tmp/pi` 仍是"项目内"（`sandboxAllowedRoots` 不再依赖 `enabled`）。
+- 配置：顶层 `sandbox` 块 = 共享 profile（`allowWrite/denyWrite/denyRead/allowRead`）；`network` 独立成顶层块（见 §3）。
+- 模式可用 `sandboxPin` 钉住状态（内置模式不再使用；保留为高级用法）。
+- 会话状态持久化（`perm-sandbox` 条目）+ 子进程转发（`PI_PERMISSION_SANDBOX`）；headless 默认 `on`。
+- **废弃**：`SandboxProfile.writable`（"项目内只读"能力随 `ro` 档移除；Plan 改走策略层，见 §2）。遗留配置里的 `writable` 被忽略。
 
-### 2.1 配置
-- 顶层 `sandbox`（全局权威；项目只能收紧）= 原各 mode.sandbox 的公共部分：
-  `writable / allowWrite / denyWrite / denyRead / allowRead / network / askOnBlockedHost`。
-- 模式去掉自带 `sandbox`；可选 **`sandboxPin?: "off" | "on" | "ro"`**（仅 Plan 用 `ro`）。
-- 兼容：模式里残留的 `sandbox` 作为 legacy override 合并（弃用警告）；旧 `enabled:false`/`writable:false` 映射为 pin。
+## 2. 模式（CC 对齐，按权限从低到高）
 
-### 2.2 优先级（R1–R4）
-- **R1** 有效档 = `mode.sandboxPin ?? sessionSandboxState`
-- **R2** `alt+s` 更新 `sessionSandboxState`；模式 pin 时提示"离开后生效"
-- **R3** pin 无法满足（`--no-sandbox`/运行时不可用）→ **降级为询问**，绝不静默放行
-- **R4** 进出带 pin 的模式只覆盖/恢复有效值，不改 `sessionSandboxState`
+| 模式 | CC 对应 | 读 | 项目内 write/edit | 项目内 bash | 越界/保护路径 |
+|---|---|---|---|---|---|
+| **plan** | plan | allow | 仅 `*.md`/`*.markdown`，其余 deny | **ask**（只读命令走白名单免问）| 人工/硬拦 |
+| **ask** | default | allow | 人工 | 人工 | 人工/硬拦 |
+| **edits** | acceptEdits | allow | **自动** | 人工 | 人工/硬拦 |
+| **auto** | auto mode | allow | 白名单/规则→放行，否则 **AI** | 白名单→放行，否则 **AI** | 文件→AI；bash 逃逸→AI |
+| **accept** | bypassPermissions | allow | 自动 | 自动 | **放行/不拦** |
 
-### 2.3 运行时
-- `sessionSandboxState` 随会话持久化（`appendEntry("perm-sandbox")`）。
-- 换模式**不再重启沙箱**；仅**有效档变化**才 `applyProfile()`。
-- 子进程转发 `PI_PERMISSION_SANDBOX`；headless 缺省 `on`；`--no-sandbox` 强制 `off`。
+- `accept`（原 bypass 改名）：**自动接受所有策略决定**，但仍受沙箱边界约束（`strict` 下越界照样 block；`on` 下外写被 OS 拦）。`bypassProtectedPaths: true` 保留（保护路径也接受）。
+- `plan` 的只读改走**策略层**（不再用沙箱 ro）：bash 变更命令弹窗、只读命令走白名单；`write/edit` 仅 Markdown；`@plan` 提示词已同步。
+- `plan.approveMode` 默认 `edits`。
 
-## 3. auto 流水线（补白名单）
+## 3. 网络：独立轴
 
-```
-旁路   保护路径/危险模式              → 硬拦
-Tier0  permission.allow 规则          → 放行
-Tier1  只读/已知安全命令白名单(内置)   → 放行（仅沙箱开启时生效）
-Tier2  其余 ask                       → 模型审批
-旁路   逃逸 / 会脱沙箱                → 人工（不交模型）
-```
-- 白名单**窄且偏只读**（`ls/cat/git status/rg…`；禁收 `rm/npm install/git commit`）。
-- 共享层：`ask` 也用 Tier1 放行只读 bash，避免"每条 `ls` 都问"。
-- 模型 fail-closed；连续拒绝达上限转人工；裁决缓存。
+- 顶层 `network` 块：`allowedDomains / deniedDomains / askOnBlockedHost`（全局权威；项目只能收紧）。
+- `ctrl+n`（`alt+n` 别名）切 `net:filtered ⇄ net:open`，会话级。
+- ⚠️ 过滤由沙箱运行时的 socat 代理实现 → **沙箱 `off` 时无法过滤**（显示 `net:open`）。运行时硬约束。
 
-## 4. footer 精简
+## 4. auto 分类器
 
-`Auto ⛨ ▣ ✻`（模式着色 + 沙箱 `⛨`on/`⛨r`ro/`∅`off/`⚠`不可用 + 网络 `▣` + 分类器 `✻`）。
-快捷键提示移出常驻状态；新增 `statusFormat: compact|verbose`；仍单键 `setStatus("perm", …)`。
+- **流水线**：硬拦（保护路径/策略 deny）→ Tier0 `permission.allow` → **Tier1 只读白名单**（`safe-command.ts`，无重定向/命令替换）→ Tier2 模型审批。
+- **上下文**：分类器看到**用户最近一条请求**（截断注入）——否则无法区分"合法编辑"与"越权操作"，会大量误拦（实测教训：一个会话 8 次人工审批）。
+- 判定**一切** `ask`（包括会脱离沙箱运行的命令）——`auto` 的语义就是"AI 是闸门"。
+- fail-closed（模型失败→拒绝）；连续拒绝达上限转人工；裁决缓存。
+- `/classifier-model [current | <provider/model>]`；`current` = 跟随会话模型。
 
-## 5. 分阶段
+## 5. footer 状态（紧凑，默认）
 
-| 阶段 | 内容 |
-|---|---|
-| **P1（进行中）** | 解耦沙箱：顶层 profile + 三态 state + `sandboxPin` + `alt+s` + `/sandbox` + 子进程转发 + legacy 迁移。**模式名/边界先不动** |
-| P2 | 模式边界重划 + 改名（ask/plan/auto/edits/bypass）+ defaults/history/audit/测试/文档 |
-| P3 | footer 紧凑 + `statusFormat` + `/perm status` |
-| P4 | README/CHANGELOG、smoke、push |
+`Auto · sandbox:on · net:filtered · AI:current-model`
 
-## 6. 待办小项
-- `edits` 命名（暂定 `edits`，可改 `accept`）。
-- `bypass + alt+s off` 首次一次性警告。
+- 模式标签着色；沙箱 token 按态配色：`off`=红 · `on`=绿 · `strict`=accent · `unavailable`=黄。
+- `net:filtered`(绿) / `net:open`(橙)，仅当沙箱在执行网络过滤时显示。
+- `AI:current-model`（跟随会话模型）或 `AI:<provider/model>`。
+- `"statusFormat": "verbose"` 可切回长格式。单键 `setStatus("perm", …)`，footer-manager 可管理。
+
+## 6. 实现清单（已落地）
+
+- `schema.ts`：`SandboxState = off|on|strict`；`NetworkConfig`；顶层 `sandbox`/`network`/`statusFormat`；`ModeDef.sandboxPin`；去掉 `writable` 语义。
+- `safe-command.ts`（新增）：只读白名单 + 链式安全判定。
+- `classifier.ts`：`recentUserRequest` 上下文注入。
+- `config-load.ts`：顶层 sandbox/network 校验合并（项目只能收紧）、`sandboxPin` 校验、`persistModeDomains` 写顶层 network。
+- `index.ts`：`sessionSandboxState` + `ctrl+s`/`ctrl+q`/`ctrl+n`、`/sandbox off|on|strict`、strict 硬拦、去 trust-all、`lastUserRequest`、去切换通知。
+- `awareness.ts`：三态边界文案（strict 行）。
+- `status.ts`：token + 三态配色。
+- `permission-mode.defaults.json`：五模式（plan/ask/edits/auto/accept）+ 顶层 sandbox/network。
+- 测试：258 项（256 通过；2 个为环境性既有失败）。
+
+## 7. 遗留 / 可选
+
+- `classifier.failClosed` 默认 `true`（模型失败→全拦）。备选：`false`（降级人工弹窗，交互式更可用）。**待定**。
+- `SandboxProfile.writable` 字段保留但**已忽略**（遗留配置兼容）；后续可从 schema 移除。
+- npm 发布（`qings-pi-modes`）与分支合并 push：**待用户定**。
