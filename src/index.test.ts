@@ -1402,15 +1402,44 @@ test("automode: allowed reads never reach the classifier", { skip }, async () =>
   }
 });
 
-test("/classifier-model persists the model and a bare call shows it", { skip }, async () => {
-  const h = await setup();
+test("/classifier-model: a bare call opens the picker, picking persists", { skip }, async () => {
+  const registry = {
+    find: () => undefined,
+    getAvailable: () => [
+      { provider: "anthropic", id: "claude-haiku-4-5" },
+      { provider: "openai", id: "gpt-5" },
+    ],
+  };
+  const h = await setup({ modelRegistry: registry, model: { id: "m", provider: "p" } });
   try {
-    await h.pi.commands.get("classifier-model")!("anthropic/claude-haiku-4-5", h.ctx);
-    const file = path.join(h.agentDir, "permission-mode", "permission-mode.json");
-    assert.equal((JSON.parse(readFileSync(file, "utf-8")) as { classifier: { model: string } }).classifier.model, "anthropic/claude-haiku-4-5");
-    h.ctx.notices.length = 0;
+    // Bare call: the picker lists `current-model` first (marked active by default),
+    // then every registry model.
+    h.ctx.answers.push("anthropic/claude-haiku-4-5");
     await h.pi.commands.get("classifier-model")!("", h.ctx);
-    assert.match(h.ctx.notices.at(-1) ?? "", /claude-haiku-4-5/);
+    assert.deepEqual(h.ctx.prompts.at(-1)?.options, [
+      "\u2713 current-model",
+      "anthropic/claude-haiku-4-5",
+      "openai/gpt-5",
+    ]);
+    const file = path.join(h.agentDir, "permission-mode", "permission-mode.json");
+    assert.equal(
+      (JSON.parse(readFileSync(file, "utf-8")) as { classifier: { model: string } }).classifier.model,
+      "anthropic/claude-haiku-4-5",
+    );
+
+    // A second bare call marks the (now) active model and can switch back.
+    h.ctx.notices.length = 0;
+    h.ctx.answers.push("\u2713 current-model");
+    await h.pi.commands.get("classifier-model")!("", h.ctx);
+    assert.deepEqual(h.ctx.prompts.at(-1)?.options, [
+      "current-model",
+      "\u2713 anthropic/claude-haiku-4-5",
+      "openai/gpt-5",
+    ]);
+    assert.equal(
+      (JSON.parse(readFileSync(file, "utf-8")) as { classifier: { model: string } }).classifier.model,
+      "current",
+    );
   } finally {
     h.cleanup();
   }

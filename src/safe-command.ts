@@ -18,6 +18,8 @@ const SAFE = new Set([
   "uname", "hostname", "date", "uptime", "df", "du", "ps", "free", "top",
   "sort", "uniq", "cut", "tr", "diff", "cmp", "sed", "jq", "nl", "basename",
   "dirname", "realpath", "readlink", "seq", "yes", "test", "true", "false",
+  "printenv", "lscpu", "nproc", "lsblk", "md5sum", "sha1sum", "sha256sum",
+  "sha512sum", "cksum", "od", "hexdump", "strings", "base64", "comm", "column",
 ]);
 
 /** git subcommands that do not write to the repo or the network. */

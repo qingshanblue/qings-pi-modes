@@ -339,7 +339,7 @@ export default async function (pi: ExtensionAPI) {
       input: review.input,
       cwd: ctx.cwd ?? root,
       isOutside: review.isOutside,
-      recentUserRequest: lastUserRequest(ctx),
+      recentUserRequest: recentUserRequests(ctx),
     };
     const key = subjectKey(subject, cfg.model);
     let verdict = classifierCache.get(key);
@@ -708,28 +708,55 @@ export default async function (pi: ExtensionAPI) {
       else ctx.ui.notify(`permission-mode: unknown mode or subcommand "${arg}"; usage: /perm [${config.cycleOrder.join("|")}|init|clear-approvals|blocks|unblock <path>]`, "warning");
     },
   });
+  /** Persist a classifier model ref and refresh the live session state. */
+  const runClassifierModelChange = async (value: string, ctx: ExtensionContext): Promise<void> => {
+    const file = persistClassifierModel(getAgentDir(), value);
+    config = loadModeConfig(ctx.cwd, getAgentDir(), (msg) => ctx.ui.notify(msg, "warning"));
+    classifierCache.clear(); // verdicts from the previous model must not survive
+    classifierDenials = createDenialState();
+    updateStatus(ctx, currentMode(), sandbox, net.open);
+    const activeRef = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "none";
+    ctx.ui.notify(
+      `permission-mode: classifier model → ${value === "current" ? `current (${activeRef})` : value} — saved to ${file}`,
+      "info",
+    );
+  };
+
   pi.registerCommand("classifier-model", {
-    description: "Show or switch the automode classifier model (current = follow the active session model)",
+    description: "Show or switch the automode classifier model (interactive picker; current = follow the active session model)",
     handler: async (args, ctx) => {
       const arg = (args ?? "").trim();
       const cfg = normalizeClassifierConfig(config.classifier);
-      const activeRef = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "no active model";
+      const activeRef = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
+
+      // No argument: an interactive picker, like /model — `current-model` first
+      // (follows the session model), then every model the registry can authenticate.
       if (!arg) {
-        return ctx.ui.notify(
-          `permission-mode: classifier ${cfg.enabled ? "on" : "off"}; model: ${cfg.model === "current" ? `current (${activeRef})` : cfg.model}; usage: /classifier-model current | <provider/model>`,
-          "info",
+        if (!ctx.hasUI) {
+          return ctx.ui.notify(
+            `permission-mode: classifier model: ${cfg.model === "current" ? `current (${activeRef ?? "none"})` : cfg.model} — usage: /classifier-model current | <provider/model>`,
+            "info",
+          );
+        }
+        const refs: Array<{ value: string; label: string }> = [{ value: "current", label: "current-model" }];
+        for (const model of ctx.modelRegistry.getAvailable()) {
+          refs.push({ value: `${model.provider}/${model.id}`, label: `${model.provider}/${model.id}` });
+        }
+        const active = cfg.model;
+        const picked = await ctx.ui.select(
+          "Classifier model (auto mode)",
+          refs.map((r) => (r.value === active ? `\u2713 ${r.label}` : r.label)),
         );
+        if (!picked) return;
+        const value = picked.replace(/^\u2713\s*/, "");
+        return runClassifierModelChange(value === "current-model" ? "current" : value, ctx);
       }
+
       if (arg !== "current" && !/^[^/\s]+\/\S+$/.test(arg)) {
         return ctx.ui.notify(`permission-mode: "${arg}" is not "current" or a provider/model id`, "warning");
       }
       try {
-        const file = persistClassifierModel(getAgentDir(), arg);
-        config = loadModeConfig(ctx.cwd, getAgentDir(), (msg) => ctx.ui.notify(msg, "warning"));
-        classifierCache.clear(); // verdicts from the previous model must not survive
-        classifierDenials = createDenialState();
-        updateStatus(ctx, currentMode(), sandbox, net.open);
-        ctx.ui.notify(`permission-mode: classifier model → ${arg === "current" ? `current (${activeRef})` : arg} — saved to ${file}`, "info");
+        await runClassifierModelChange(arg, ctx);
       } catch (e) {
         ctx.ui.notify(`permission-mode: could not save classifier model: ${e}`, "error");
       }
@@ -841,13 +868,16 @@ export default async function (pi: ExtensionAPI) {
   };
 
   /**
-   * The user's most recent message — the classifier's authorization context.
-   * Without it the reviewer only sees the raw action and over-denies legitimate
-   * work (it cannot tell an intended edit from a rogue one).
+   * The user's recent messages (latest first, `max` kept) — the classifier's
+   * authorization context. Without them the reviewer only sees the raw action
+   * and over-denies legitimate work (it cannot tell an intended edit from a
+   * rogue one). Multi-turn work especially: the request that motivated an edit
+   * is often several turns back.
    */
-  const lastUserRequest = (ctx: ExtensionContext): string | undefined => {
+  const recentUserRequests = (ctx: ExtensionContext, max = 3): string | undefined => {
     const entries = ctx.sessionManager.getBranch?.() ?? ctx.sessionManager.getEntries();
-    for (let i = entries.length - 1; i >= 0; i--) {
+    const found: string[] = [];
+    for (let i = entries.length - 1; i >= 0 && found.length < max; i--) {
       const e = entries[i] as { type?: string; message?: { role?: string; content?: unknown } };
       if (e?.type !== "message" || e.message?.role !== "user") continue;
       const content = e.message.content;
@@ -860,9 +890,9 @@ export default async function (pi: ExtensionAPI) {
         }
       }
       const cleaned = text.replace(/\s+/g, " ").trim();
-      return cleaned || undefined;
+      if (cleaned) found.unshift(cleaned.length > 300 ? `${cleaned.slice(0, 300)}\u2026` : cleaned);
     }
-    return undefined;
+    return found.length ? found.join("\n\u2014\n") : undefined;
   };
 
   pi.registerCommand("sandbox", {
@@ -1248,7 +1278,15 @@ export default async function (pi: ExtensionAPI) {
       // honor their explicit bash policy. Bypass/Accept remains silent because
       // its policy is `allow`; an unsandboxed `ask` mode must still prompt.
       if (!modeSandbox(m).enabled) {
-        const gate = bashGate(decide(m, "bash", command), undefined, false, sandbox.ready);
+        const action = decide(m, "bash", command);
+        // Tier 1 whitelist applies here too: with the sandbox off there is no
+        // OS confinement, so a read-only command is safe to auto-run — and it
+        // saves a classifier call for every whitelisted bash in auto mode.
+        if (action === "ask") {
+          const analysis = await analyzeBash(command, root, bounds);
+          if (!analysis.outsideReason && isSafeBashChain(analysis.commands, command)) return undefined;
+        }
+        const gate = bashGate(action, undefined, false, sandbox.ready);
         if (gate.kind === "block") return { block: true, reason: gate.reason };
         if (gate.kind === "prompt") {
           // Without an AST parse, scope a session grant to the exact command.
