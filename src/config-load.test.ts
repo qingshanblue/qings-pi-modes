@@ -63,8 +63,8 @@ test("loadStockDefaults: reads the shipped JSON → five modes, correct defaults
 test("FALLBACK_CONFIG is a valid, safe single-mode config", () => {
   assert.equal(FALLBACK_CONFIG.defaultMode, "default");
   assert.deepEqual(Object.keys(FALLBACK_CONFIG.modes), ["default"]);
+  assert.equal(FALLBACK_CONFIG.sandbox?.enabled, true); // sandboxed
   const d = FALLBACK_CONFIG.modes.default;
-  assert.equal(d.sandbox.enabled, true); // sandboxed
   assert.equal(decide(d, "bash", "ls"), "ask"); // never silently allows
   assert.equal(decide(d, "write", "x.ts"), "ask");
 });
@@ -147,9 +147,10 @@ test("warns on array-index-like pattern keys (JS front-loads their order)", () =
 test("project: tighten-only — can tighten, never loosen", () => {
   const s = sandbox({
     project: {
+      sandbox: { enabled: false, writable: false, allowWrite: ["."], denyRead: ["~/.config"] },
       modes: {
-        default: { permission: { bash: "deny", write: "allow" }, sandbox: { enabled: false, writable: false } },
-        yolo: { sandbox: { enabled: true } },
+        default: { permission: { bash: "deny", write: "allow" } },
+        yolo: { sandboxPin: "on" },
       },
     },
   });
@@ -158,30 +159,20 @@ test("project: tighten-only — can tighten, never loosen", () => {
   assert.equal(decide(c.modes.default, "bash", "ls"), "deny");
   // write ask + project "allow": most-restrictive overlay can't loosen → stays ask.
   assert.equal(decide(c.modes.default, "write", "x.ts"), "ask");
-  // A project cannot disable globally enabled containment.
-  assert.equal(c.modes.default.sandbox.enabled, true);
-  assert.ok(s.errors.some((e) => /cannot change sandbox\.enabled.*false/.test(e)));
-  // Project config also cannot create a new runtime profile by enabling a
-  // globally unsandboxed mode.
-  assert.equal(c.modes.yolo.sandbox.enabled, false);
-  assert.ok(s.errors.some((e) => /cannot change sandbox\.enabled.*true/.test(e)));
-  // sandbox writable forced off.
-  assert.equal(c.modes.default.sandbox.writable, false);
+  // A project cannot change sandbox.enabled (containment stays as configured).
+  assert.equal(c.sandbox?.enabled, true);
+  assert.ok(s.errors.some((e) => /cannot change sandbox\.enabled/.test(e)));
+  // Project may force read-only, and cannot set a mode's sandboxPin.
+  assert.equal(c.sandbox?.writable, false);
+  assert.equal(c.modes.yolo.sandboxPin, "off"); // stock yolo pin unchanged
+  assert.ok(s.errors.some((e) => /cannot set sandboxPin for mode "yolo"/.test(e)));
   s.cleanup();
 });
 
 test("project: repeating inherited sandbox.enabled is a silent no-op", () => {
-  const s = sandbox({
-    project: {
-      modes: {
-        default: { sandbox: { enabled: true } },
-        yolo: { sandbox: { enabled: false } },
-      },
-    },
-  });
+  const s = sandbox({ project: { sandbox: { enabled: true } } }); // same as the stock default
   const c = loadModeConfig(s.cwd, s.agentDir, (m) => s.errors.push(m));
-  assert.equal(c.modes.default.sandbox.enabled, true);
-  assert.equal(c.modes.yolo.sandbox.enabled, false);
+  assert.equal(c.sandbox?.enabled, true);
   assert.ok(!s.errors.some((e) => /sandbox\.enabled/.test(e)));
   s.cleanup();
 });
@@ -189,23 +180,19 @@ test("project: repeating inherited sandbox.enabled is a silent no-op", () => {
 test("project: sandbox intersect/union + unsafe domains rejected", () => {
   const s = sandbox({
     project: {
-      modes: {
-        build: {
-          sandbox: {
-            allowWrite: ["."], // intersect with ['.','/tmp/pi'] → ['.']
-            denyRead: ["~/.config"], // union
-            allowRead: ["~/.cache", "~/.local"], // intersect with the global carve-outs: a project cannot open new ones
-            network: { allowedDomains: ["github.com", "*.com"] }, // *.com rejected
-          },
-        },
+      sandbox: {
+        allowWrite: ["."], // intersect with the stock ['.','/tmp/pi'] → ['.']
+        denyRead: ["~/.config"], // union
+        allowRead: ["~/.cache", "~/.local"], // intersect with the stock carve-outs: a project cannot open new ones
+        network: { allowedDomains: ["github.com", "*.com"] }, // *.com rejected
       },
     },
   });
   const c = loadModeConfig(s.cwd, s.agentDir, (m) => s.errors.push(m));
-  const sb = c.modes.build.sandbox;
+  const sb = c.sandbox!;
   assert.deepEqual(sb.allowWrite, ["."]); // intersected
   assert.ok(sb.denyRead?.includes("~/.config") && sb.denyRead?.includes("~/.ssh")); // unioned
-  assert.deepEqual(sb.allowRead, [], "the stock mode has no carve-outs, so the project cannot add any");
+  assert.deepEqual(sb.allowRead, [], "the stock profile has no carve-outs, so the project cannot add any");
   assert.deepEqual(sb.network?.allowedDomains, ["github.com"]); // *.com dropped (intersect of safe)
   assert.ok(s.errors.some((e) => /overly-broad/.test(e)));
   s.cleanup();
@@ -274,8 +261,10 @@ test("profileToConfig output validates against the runtime's SandboxRuntimeConfi
   const stock = loadStockDefaults();
   const checked: string[] = [];
   for (const [name, mode] of Object.entries(stock.modes)) {
-    if (!mode.sandbox.enabled) continue;
-    const cfg = profileToConfig(mode.sandbox);
+    const st = mode.sandboxPin ?? "on";
+    if (st === "off") continue;
+    const prof = { ...stock.sandbox!, enabled: true, writable: st === "on" };
+    const cfg = profileToConfig(prof);
     assert.doesNotThrow(() => runtimeSchema!.parse({ network: cfg.network, filesystem: cfg.filesystem }), `${name}: ${JSON.stringify(cfg)}`);
     // Plan mode's per-wrap override keeps the shape too.
     assert.doesNotThrow(() => runtimeSchema!.parse(readOnlyOverride(cfg, ["/tmp/pi/s1"])));
@@ -283,18 +272,18 @@ test("profileToConfig output validates against the runtime's SandboxRuntimeConfi
   }
   assert.deepEqual(checked, ["default", "plan", "build", "automode"]);
   // The README's strict-home shape (denyRead "~" with allowRead carve-outs) validates as well.
-  const strict = profileToConfig({ ...stock.modes.build.sandbox, denyRead: ["~"], allowRead: [".", "/tmp/pi", "~/.cache"] });
+  const strict = profileToConfig({ ...stock.sandbox!, denyRead: ["~"], allowRead: [".", "/tmp/pi", "~/.cache"] });
   assert.doesNotThrow(() => runtimeSchema!.parse({ network: strict.network, filesystem: strict.filesystem }));
 });
 
-test("project: allowRead can only be narrowed, and only where the global mode has carve-outs", () => {
+test("project: allowRead can only be narrowed, and only where the global has carve-outs", () => {
   const s = sandbox({
-    global: { modes: { build: { sandbox: { denyRead: ["~"], allowRead: [".", "~/.cache", "~/.config"] } } } },
-    project: { modes: { build: { sandbox: { allowRead: ["~/.cache", "~/Secrets"] } } } },
+    global: { sandbox: { denyRead: ["~"], allowRead: [".", "~/.cache", "~/.config"] } },
+    project: { sandbox: { allowRead: ["~/.cache", "~/Secrets"] } },
   });
   const c = loadModeConfig(s.cwd, s.agentDir, (m) => s.errors.push(m));
-  assert.deepEqual(c.modes.build.sandbox.denyRead, ["~"]);
-  assert.deepEqual(c.modes.build.sandbox.allowRead, ["~/.cache"], "kept what both list; ~/Secrets was never open");
+  assert.deepEqual(c.sandbox?.denyRead, ["~"]);
+  assert.deepEqual(c.sandbox?.allowRead, ["~/.cache"], "kept what both list; ~/Secrets was never open");
   s.cleanup();
 });
 
@@ -314,20 +303,20 @@ test("persistModeRule: creates the global file with the learned rule, round-trip
 
 test("persistModeDomains: appends to the FULL stock+global allowlist, round-trips", () => {
   const s = sandbox();
-  const stockDomains = loadStockDefaults().modes.default.sandbox.network?.allowedDomains ?? [];
+  const stockDomains = loadStockDefaults().sandbox?.network?.allowedDomains ?? [];
   const file = persistModeDomains(s.agentDir, "default", ["api.internal.io"]);
   const written = JSON.parse(readFileSync(file, "utf-8"));
   // mergeGlobal replaces `network` wholesale, so the stock domains must be
   // baked into the persisted list or they'd be lost on the next load.
-  const list = written.modes.default.sandbox.network.allowedDomains as string[];
+  const list = written.sandbox.network.allowedDomains as string[];
   for (const d of stockDomains) assert.ok(list.includes(d), `stock domain ${d} preserved`);
   assert.ok(list.includes("api.internal.io"));
   const c = loadModeConfig(s.cwd, s.agentDir, () => {});
-  assert.ok(c.modes.default.sandbox.network?.allowedDomains?.includes("api.internal.io"));
-  assert.ok(c.modes.default.sandbox.network?.allowedDomains?.includes(stockDomains[0]));
+  assert.ok(c.sandbox?.network?.allowedDomains?.includes("api.internal.io"));
+  assert.ok(c.sandbox?.network?.allowedDomains?.includes(stockDomains[0]));
   // Idempotent: persisting again doesn't duplicate.
   persistModeDomains(s.agentDir, "default", ["api.internal.io"]);
-  const again = JSON.parse(readFileSync(file, "utf-8")).modes.default.sandbox.network.allowedDomains as string[];
+  const again = JSON.parse(readFileSync(file, "utf-8")).sandbox.network.allowedDomains as string[];
   assert.equal(again.filter((d) => d === "api.internal.io").length, 1);
   s.cleanup();
 });
@@ -335,22 +324,21 @@ test("persistModeDomains: appends to the FULL stock+global allowlist, round-trip
 test("persistModeDomains: never bakes a project's tightened list into the global config", () => {
   // Project intersects the allowlist down to one domain; a forever-grant made
   // while that project is open must still persist against the UNTIGHTENED base.
-  const s = sandbox({ project: { modes: { default: { sandbox: { network: { allowedDomains: ["github.com"] } } } } } });
-  const stockDomains = loadStockDefaults().modes.default.sandbox.network?.allowedDomains ?? [];
+  const s = sandbox({ project: { sandbox: { network: { allowedDomains: ["github.com"] } } } });
+  const stockDomains = loadStockDefaults().sandbox?.network?.allowedDomains ?? [];
   const file = persistModeDomains(s.agentDir, "default", ["api.internal.io"]);
-  const list = JSON.parse(readFileSync(file, "utf-8")).modes.default.sandbox.network.allowedDomains as string[];
+  const list = JSON.parse(readFileSync(file, "utf-8")).sandbox.network.allowedDomains as string[];
   for (const d of stockDomains) assert.ok(list.includes(d), `stock domain ${d} not lost to project tightening`);
   s.cleanup();
 });
 
 test("project: askOnBlockedHost can be forced off (silent deny), never back on", () => {
   const s = sandbox({
-    global: { modes: { default: { sandbox: { askOnBlockedHost: false } } } },
-    project: { modes: { default: { sandbox: { askOnBlockedHost: true } }, build: { sandbox: { askOnBlockedHost: false } } } },
+    global: { sandbox: { askOnBlockedHost: false } },
+    project: { sandbox: { askOnBlockedHost: true } },
   });
   const c = loadModeConfig(s.cwd, s.agentDir, (m) => s.errors.push(m));
-  assert.equal(c.modes.default.sandbox.askOnBlockedHost, false); // project cannot re-enable asking
-  assert.equal(c.modes.build.sandbox.askOnBlockedHost, false); // project may force silent-deny
+  assert.equal(c.sandbox?.askOnBlockedHost, false); // project cannot re-enable asking
   s.cleanup();
 });
 
@@ -394,7 +382,7 @@ test("hostile project config never throws: malformed values are ignored with war
     });
     const c = loadModeConfig(s.cwd, s.agentDir, (m) => s.errors.push(m));
     assert.equal(decide(c.modes.default, "read", "key.pem"), "deny", `global layer applied for ${JSON.stringify(project)}`);
-    assert.equal(c.modes.default.sandbox.enabled, true);
+    assert.equal(c.sandbox?.enabled, true);
     assert.ok(s.errors.length > 0, `warned for ${JSON.stringify(project)}`);
     s.cleanup();
   }
@@ -428,21 +416,20 @@ test("global: invalid action inside a pattern map is coerced to deny, not droppe
   s.cleanup();
 });
 
-test("global: a new mode without permission/sandbox booleans gets safe defaults and warnings; prototype names are not modes", () => {
+test("global: a new mode needs only label+color (sandbox is shared); prototype names are not modes", () => {
   const s = sandbox({
     global:
       '{"cycleOrder":["default","review","constructor","toString"],"modes":{' +
-      '"review":{"label":"Review","color":"mdLink","sandbox":{}},' +
-      '"__proto__":{"label":"X","color":"muted","sandbox":{"enabled":true,"writable":true},"permission":{}}}}',
+      '"review":{"label":"Review","color":"mdLink"},' +
+      '"__proto__":{"label":"X","color":"muted","permission":{}}}}',
   });
   const c = loadModeConfig(s.cwd, s.agentDir, (m) => s.errors.push(m));
   assert.deepEqual(c.cycleOrder, ["default", "review"]);
-  assert.equal(c.modes.review.sandbox.enabled, true);
-  assert.equal(c.modes.review.sandbox.writable, true);
+  assert.equal(c.modes.review.sandbox, undefined); // decoupled: the shared top-level profile applies
+  assert.equal(c.modes.review.label, "Review");
   assert.deepEqual(c.modes.review.permission, {});
   assert.equal(decide(c.modes.review, "write", "x.ts"), "ask"); // no throw, least privilege
   assert.ok(!Object.hasOwn(c.modes, "__proto__"));
-  assert.match(s.errors.join("\n"), /sandbox.enabled missing/);
   assert.match(s.errors.join("\n"), /no permission block/);
   s.cleanup();
 });
@@ -533,5 +520,21 @@ test("classifier: a project config cannot set it (global-only reviewer settings)
   assert.equal(c.modes.build.classifier, undefined);
   assert.ok(s.errors.some((e) => /project config cannot set classifier/.test(e)));
   assert.ok(s.errors.some((e) => /cannot set classifier for mode "build"/.test(e)));
+  s.cleanup();
+});
+
+test("sandbox: top-level profile merges; per-mode sandboxPin is validated (bad ones dropped)", () => {
+  const s = sandbox({
+    global: {
+      sandbox: { allowWrite: ["."], denyRead: ["~/.config"] },
+      modes: { default: { sandboxPin: "ro" }, build: { sandboxPin: "bogus" } },
+    },
+  });
+  const c = loadModeConfig(s.cwd, s.agentDir, (m) => s.errors.push(m));
+  assert.deepEqual(c.sandbox?.allowWrite, ["."]); // global override of the stock profile
+  assert.ok(c.sandbox?.denyRead?.includes("~/.config"));
+  assert.equal(c.modes.default.sandboxPin, "ro");
+  assert.equal(c.modes.build.sandboxPin, undefined); // invalid value dropped
+  assert.ok(s.errors.some((e) => /sandboxPin in global mode "build"/.test(e)));
   s.cleanup();
 });

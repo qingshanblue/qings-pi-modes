@@ -24,6 +24,10 @@
       "description": "Order modes are cycled with alt+m; also the display order.",
       "items": { "type": "string" }
     },
+    "sandbox": {
+      "$ref": "#/$defs/sandbox",
+      "description": "The shared OS-sandbox profile (allowWrite / denyRead / network / …). Global-only authority; a project may only tighten it. `enabled`/`writable` here are the sensible defaults; the live state is the `alt+s` toggle (\"off\" | \"on\" | \"ro\"), which a mode may pin via `sandboxPin`."
+    },
     "modes": {
       "type": "object",
       "description": "Map of mode name → mode definition.",
@@ -117,7 +121,8 @@
         "color": { "enum": ["muted", "mdLink", "accent", "error", "warning"], "description": "Footer label color." },
         "systemPrompt": { "type": "string", "description": "System prompt to inject; '@plan' resolves to the dated Plan-mode prompt." },
         "injectSandboxInfo": { "type": "boolean", "description": "Inject the mode's sandbox boundaries (writable paths, denied reads, network allowlist) into the system prompt each turn (default true). Modes with sandbox.enabled:false never inject." },
-        "sandbox": { "$ref": "#/$defs/sandbox" },
+        "sandbox": { "$ref": "#/$defs/sandbox", "description": "Legacy per-mode sandbox override. Prefer the top-level `sandbox`; kept for backward compatibility." },
+        "sandboxPin": { "enum": ["off", "on", "ro"], "description": "Force the sandbox state while this mode is active (overrides the `alt+s` session toggle, restored on leaving). Only Plan ships one (`ro`)." },
         "permission": { "$ref": "#/$defs/permission" },
         "hideTools": { "type": "array", "items": { "type": "string" }, "description": "Tools hidden from the model in this mode." },
         "bypassProtectedPaths": { "type": "boolean", "description": "Skip the .git/.env/dotfile write backstop (only trusted modes)." },

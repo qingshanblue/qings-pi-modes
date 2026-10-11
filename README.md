@@ -109,7 +109,16 @@ be retuned, and you can add your own, in `permission-mode.json` (see
 | **Plan Mode** | Planning mode. Reads are free; in-project `bash` runs **sandboxed read-only** (writes/deletes fail), so only read commands effectively work. The one mutation allowed without confirmation is **creating/editing Markdown** (`*.md`/`*.markdown`) inside the project - other `edit`/`write` are blocked. A system-prompt addition steers the model: for a planning task, write the plan to `plan/<YYYY-MM-DD>_<description>.md`, render it for review with the **`show_plan`** tool, then hand over to you: an **Accept / Decline** prompt follows the plan (see [Approving a plan](#approving-a-plan)). |
 | **Build** | Reads, writes, and `bash` **inside the project** run with no confirmation; in-project `bash` runs **sandboxed**. |
 | **Auto** | Reads are free; `bash`/`edit`/`write`, out-of-project access, web search, and extension tools are judged by the **AI safety classifier** instead of prompting you (see [AI automode](#ai-automode)). Runs **sandboxed**; an action that would run unsandboxed (an escape, privilege escalation, or a degraded sandbox) still goes to a human. |
-| **YOLO** | Never prompts, never sandboxes, no protected-path backstop. Can do anything the current user can. |
+| **YOLO** | Never prompts, never sandboxes, no protected-path backstop. Can do anything the current user can. Pins the sandbox `off`. |
+
+The **OS sandbox is decoupled from the mode.** `alt+m` picks the approval mode;
+`alt+s` cycles the **sandbox state** `off → on → ro` (`/sandbox off|on|ro` sets
+it, `/sandbox` shows the detail). `off` runs bash unsandboxed, `on` confines
+writes to the project, `ro` makes bash read-only. A mode may **pin** a state
+with `sandboxPin` (Plan pins `ro`, YOLO pins `off`); a pin overrides `alt+s`
+while that mode is active and the session state is restored when you leave it.
+The state is session-scoped and forwarded to subagents (`PI_PERMISSION_SANDBOX`);
+a headless child with no forwarded state defaults to `on`.
 
 In every mode except YOLO: **out-of-project** access prompts; `bash` that
 reaches outside the project or **escalates privileges**
@@ -453,6 +462,14 @@ Modes are data, layered in this order:
   "$schema": "https://raw.githubusercontent.com/qingshanblue/qings-pi-modes/main/schemas/permission-mode.schema.json",
   "defaultMode": "default",
   "cycleOrder": ["default", "plan", "build", "automode", "yolo"],
+  "sandbox": {                         // the shared OS-sandbox profile (one place; global-only)
+    "allowWrite": [".", "/tmp/pi"],  // the sandbox state (alt+s) sets enabled/read-only around this profile
+    "denyRead": ["~/.ssh", "~/.aws", "~/.gnupg"],
+    "allowRead": [],                 // readable again inside denyRead (see "Strict home" below)
+    "denyWrite": [],
+    "network": { "allowedDomains": ["github.com", "*.github.com"], "deniedDomains": [] },
+    "askOnBlockedHost": true          // live prompt for hosts outside the allowlist (false = silent deny)
+  },
   "classifier": {                       // AI safety classifier for modes with "classifier": true
     "model": "current",                 // "current" = the active session model; else "provider/model"
     "timeoutMs": 15000,
@@ -465,16 +482,7 @@ Modes are data, layered in this order:
       "systemPrompt": "@plan",          // optional; "@plan" = the dated Plan-mode prompt
       "injectSandboxInfo": true,        // inject the mode's sandbox boundaries into the system prompt (default true)
       "classifier": false,               // true = route this mode's "ask" decisions to the AI classifier
-      "sandbox": {
-        "enabled": true,                // false = run bash unsandboxed (YOLO-style)
-        "writable": true,               // false = bash runs read-only (Plan-style)
-        "allowWrite": [".", "/tmp/pi"],
-        "denyRead": ["~/.ssh", "~/.aws", "~/.gnupg"],
-        "allowRead": [],                // readable again inside denyRead (see "Strict home" below)
-        "denyWrite": [],
-        "network": { "allowedDomains": ["github.com", "*.github.com"], "deniedDomains": [] },
-        "askOnBlockedHost": true          // live prompt for hosts outside the allowlist (false = silent deny)
-      },
+      "sandboxPin": "on",               // optional: force the sandbox state (off|on|ro) while this mode is active
       "permission": {
         "path": { "*": "allow", "*.env": "deny" },  // cross-cutting gate (deny overrides per-tool allow)
         "external_directory": "ask",                // the out-of-project boundary

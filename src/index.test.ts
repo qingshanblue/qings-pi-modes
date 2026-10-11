@@ -218,6 +218,7 @@ async function setup(
   process.env.PI_CODING_AGENT_DIR = agentDir;
   process.env.PI_PERMISSION_TMPDIR = scratchBase; // never touch the real /tmp/pi from tests
   delete process.env.PI_PERMISSION_MODE;
+  delete process.env.PI_PERMISSION_SANDBOX;
   if (opts.envMode !== undefined) process.env.PI_PERMISSION_MODE = opts.envMode;
 
   const pi = new FakePi();
@@ -254,6 +255,7 @@ async function setup(
       delete process.env.CLAUDE_CODE_TMPDIR;
       delete process.env.CLAUDE_TMPDIR;
       delete process.env.PI_PERMISSION_MODE;
+      delete process.env.PI_PERMISSION_SANDBOX;
       rmSync(base, { recursive: true, force: true });
     },
   };
@@ -795,11 +797,8 @@ test("defaults audit: stale /perm-init copy warns per field, acknowledge silence
     h.ctx.notices.length = 0;
     await h.pi.emit("session_start", {}, h.ctx);
     const stale = h.ctx.notices.find((n) => /still hold an outdated default/.test(n)) ?? "";
-    assert.match(stale, /7 value\(s\)/); // cycleOrder plus allowWrite (2.3.0) and denyRead (2.4.0) in each sandboxed mode
-    for (const m of ["default", "plan", "build"]) {
-      assert.match(stale, new RegExp(`modes\\.${m}\\.sandbox\\.allowWrite still holds the 2\\.0\\.0 to 2\\.2\\.1 default`));
-      assert.match(stale, new RegExp(`modes\\.${m}\\.sandbox\\.denyRead still holds the 2\\.0\\.0 to 2\\.3\\.1 default`));
-    }
+    assert.match(stale, /1 value\(s\)/); // only cycleOrder is stale; the per-mode sandbox leaves are gone (decoupled)
+    assert.match(stale, /cycleOrder still holds the 2\.0\.0 to 2\.3\.1 default/);
     assert.match(stale, /acknowledgeDefaults/);
     const upgrade = h.ctx.notices.find((n) => /updated 2\.0\.0 ->/.test(n)) ?? "";
     assert.match(upgrade, /stock defaults changed for .*modes\.default\.sandbox\.allowWrite/);
@@ -1404,6 +1403,58 @@ test("/classifier-model persists the model and a bare call shows it", { skip }, 
     h.ctx.notices.length = 0;
     await h.pi.commands.get("classifier-model")!("", h.ctx);
     assert.match(h.ctx.notices.at(-1) ?? "", /claude-haiku-4-5/);
+  } finally {
+    h.cleanup();
+  }
+});
+
+// --- sandbox decoupling (alt+s / pin) ---------------------------------------
+
+test("sandbox: alt+s cycles off/on/ro and /sandbox sets it", { skip }, async () => {
+  const h = await setup();
+  try {
+    const altS = h.pi.shortcuts.get("alt+s")!;
+    await altS(h.ctx); // on → ro
+    assert.match(h.ctx.notices.at(-1) ?? "", /read-only/);
+    assert.deepEqual(h.pi.entries.at(-1), { customType: "perm-sandbox", data: { state: "ro" } });
+    await altS(h.ctx); // ro → off
+    assert.match(h.ctx.notices.at(-1) ?? "", /sandbox OFF/);
+    await altS(h.ctx); // off → on
+    assert.match(h.ctx.notices.at(-1) ?? "", /sandbox on/);
+    // Direct set via the command.
+    h.ctx.notices.length = 0;
+    await h.pi.commands.get("sandbox")!("off", h.ctx);
+    assert.match(h.ctx.notices.at(-1) ?? "", /sandbox OFF/);
+    h.ctx.notices.length = 0;
+    await h.pi.commands.get("sandbox")!("bogus", h.ctx);
+    assert.match(h.ctx.notices.at(-1) ?? "", /usage: \/sandbox/);
+  } finally {
+    h.cleanup();
+  }
+});
+
+test("sandbox: a pinned mode overrides alt+s (plan→ro, yolo→off)", { skip }, async () => {
+  const h = await setup();
+  try {
+    await h.perm("plan");
+    h.ctx.notices.length = 0;
+    await h.pi.shortcuts.get("alt+s")!(h.ctx);
+    assert.match(h.ctx.notices.join("\n"), /Plan Mode pins "ro"/);
+    await h.perm("yolo");
+    h.ctx.notices.length = 0;
+    await h.pi.shortcuts.get("alt+s")!(h.ctx);
+    assert.match(h.ctx.notices.join("\n"), /YOLO pins "off"/);
+  } finally {
+    h.cleanup();
+  }
+});
+
+test("sandbox: the session state is restored from the persisted entry", { skip }, async () => {
+  const h = await setup({ entries: [{ type: "custom", customType: "perm-sandbox", data: { state: "off" } }] });
+  try {
+    h.ctx.notices.length = 0;
+    await h.pi.commands.get("sandbox")!("", h.ctx);
+    assert.match(h.ctx.notices.join("\n"), /sandbox OFF/);
   } finally {
     h.cleanup();
   }

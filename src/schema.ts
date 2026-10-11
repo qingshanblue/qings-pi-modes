@@ -72,10 +72,17 @@ export const FILE_SURFACES: Surface[] = ["read", "write", "edit", "grep", "find"
 /** Footer label colors (semantic theme tokens, no icons). */
 export type ModeColor = "muted" | "mdLink" | "accent" | "error" | "warning";
 
+/** The runtime sandbox state: `off` (none), `on` (project-writable), `ro` (read-only). */
+export type SandboxState = "off" | "on" | "ro";
+
 /**
  * The OS-sandbox profile for a mode. `enabled:false` runs bash unsandboxed
  * (YOLO); `writable:false` confines bash to reads (Plan). The filesystem/network
  * fields feed @anthropic-ai/sandbox-runtime.
+ *
+ * As of the sandbox decoupling, the profile is normally the TOP-LEVEL
+ * `PermissionModeConfig.sandbox`; a mode's own `sandbox` is a legacy override
+ * (still honored) and `sandboxPin` is the supported way to force a state.
  */
 export interface SandboxProfile {
   enabled: boolean;
@@ -117,7 +124,13 @@ export interface ModeDef {
    * false to opt out. Modes with `sandbox.enabled: false` never inject.
    */
   injectSandboxInfo?: boolean;
-  sandbox: SandboxProfile;
+  sandbox?: SandboxProfile;
+  /**
+   * Force the sandbox state while this mode is active (`off` | `on` | `ro`).
+   * Overrides the session's `alt+s` state (R1 in the design), restored when the
+   * mode is left. Only Plan ships one (`ro`). Absent = use the session state.
+   */
+  sandboxPin?: SandboxState;
   permission: Partial<Record<Surface, SurfaceValue>>;
   /** Tool names hidden from the model while this mode is active. */
   hideTools?: string[];
@@ -150,6 +163,12 @@ export interface PermissionModeConfig {
   /** alt+m cycle order; also the display order. */
   cycleOrder: string[];
   modes: Record<string, ModeDef>;
+  /**
+   * The shared OS-sandbox profile (allowWrite / denyRead / network / …). The
+   * per-mode `sandbox` is a legacy override; `sandboxPin` forces a state.
+   * Global-only authority; a project may only tighten it.
+   */
+  sandbox?: SandboxProfile;
   /** One-step plan approval settings (plan-approval.ts). Global config only. */
   plan?: PlanApprovalConfig;
   /**

@@ -31,6 +31,7 @@ import {
   PLAN_PROMPT_SENTINEL,
   type PermissionModeConfig,
   type SandboxProfile,
+  type SandboxState,
   type SurfaceValue,
   type Surface,
   SURFACES,
@@ -73,6 +74,9 @@ export function hasMode(modes: Record<string, unknown>, name: unknown): name is 
 
 const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
 const MODE_COLORS = new Set(["muted", "mdLink", "accent", "error", "warning"]);
+
+const SANDBOX_STATES = new Set(["off", "on", "ro"]);
+const isSandboxState = (v: unknown): v is SandboxState => typeof v === "string" && SANDBOX_STATES.has(v);
 
 /**
  * Keep only well-typed sandbox fields from a raw override, warning about the
@@ -135,18 +139,18 @@ function sanitizeSandbox(raw: unknown, where: string, onError: OnError): Partial
 export const FALLBACK_CONFIG: PermissionModeConfig = {
   defaultMode: "default",
   cycleOrder: ["default"],
+  sandbox: {
+    enabled: true,
+    writable: true,
+    allowWrite: ["."],
+    denyWrite: [],
+    denyRead: ["~/.ssh", "~/.aws", "~/.gnupg"],
+    network: { allowedDomains: [], deniedDomains: [] },
+  },
   modes: {
     default: {
       label: "Default",
       color: "muted",
-      sandbox: {
-        enabled: true,
-        writable: true,
-        allowWrite: ["."],
-        denyWrite: [],
-        denyRead: ["~/.ssh", "~/.aws", "~/.gnupg"],
-        network: { allowedDomains: [], deniedDomains: [] },
-      },
       permission: {
         path: { "*": "allow" },
         external_directory: "ask",
@@ -219,6 +223,16 @@ export function isUnsafeDomain(d: string): boolean {
 const union = (a: string[] = [], b: string[] = []): string[] => [...new Set([...a, ...b])];
 const intersect = (a: string[] = [], b: string[] = []): string[] => a.filter((x) => b.includes(x));
 
+/** A benign empty profile: the base for `tightenSandbox` when no top-level sandbox exists yet. */
+const EMPTY_SANDBOX: SandboxProfile = {
+  enabled: true,
+  writable: true,
+  allowWrite: [],
+  denyWrite: [],
+  denyRead: [],
+  network: { allowedDomains: [], deniedDomains: [] },
+};
+
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
@@ -289,7 +303,7 @@ function mergeMode(base: ModeDef, over: Partial<ModeDef>): ModeDef {
   return {
     ...base,
     ...over,
-    sandbox: over.sandbox ? { ...base.sandbox, ...over.sandbox } : base.sandbox,
+    sandbox: over.sandbox ? { ...(base.sandbox ?? {}), ...over.sandbox } : base.sandbox,
     // Surface-level shallow merge: an override replaces a whole surface's value.
     permission: { ...base.permission, ...(over.permission ?? {}) },
     hideTools: over.hideTools ?? base.hideTools,
@@ -322,6 +336,10 @@ function mergeGlobal(base: PermissionModeConfig, over: Partial<PermissionModeCon
     const m: Partial<ModeDef> = { ...(raw as Partial<ModeDef>) };
     if (raw.permission !== undefined) m.permission = cleanPermission(raw.permission, where, onError) as ModeDef["permission"];
     if (raw.sandbox !== undefined) m.sandbox = sanitizeSandbox(raw.sandbox, where, onError) as SandboxProfile;
+    if (raw.sandboxPin !== undefined && !isSandboxState(raw.sandboxPin)) {
+      onError(`permission-mode: ignoring sandboxPin in ${where}: must be "off", "on" or "ro"`);
+      delete m.sandboxPin;
+    }
     if (raw.classifier !== undefined && typeof raw.classifier !== "boolean") {
       onError(`permission-mode: ignoring classifier in ${where}: must be a boolean`);
       delete m.classifier;
@@ -333,27 +351,18 @@ function mergeGlobal(base: PermissionModeConfig, over: Partial<PermissionModeCon
     if (hasMode(modes, name)) {
       modes[name] = mergeMode(modes[name], m);
     } else {
-      // A new mode: label, color, and a sandbox object are required; the
-      // sandbox booleans default to the safe side and permission to {}
-      // (which resolves to "ask" everywhere), each with a warning.
-      if (typeof m.label !== "string" || !MODE_COLORS.has(String(m.color)) || !isPlainObject(raw.sandbox)) {
-        onError(`permission-mode: ignoring incomplete new global mode "${name}" (needs label, color, sandbox)`);
+      // A new mode: label and color are required; the sandbox profile is the
+      // shared top-level one (a mode's own `sandbox` is a legacy override), and
+      // permission defaults to {} (which resolves to "ask" everywhere).
+      if (typeof m.label !== "string" || !MODE_COLORS.has(String(m.color))) {
+        onError(`permission-mode: ignoring incomplete new global mode "${name}" (needs label, color)`);
         continue;
-      }
-      const sandbox = m.sandbox as Partial<SandboxProfile>;
-      if (typeof sandbox.enabled !== "boolean") {
-        onError(`permission-mode: ${where}: sandbox.enabled missing; defaulting to true`);
-        sandbox.enabled = true;
-      }
-      if (typeof sandbox.writable !== "boolean") {
-        onError(`permission-mode: ${where}: sandbox.writable missing; defaulting to true`);
-        sandbox.writable = true;
       }
       if (m.permission === undefined) {
         onError(`permission-mode: ${where}: no permission block; every surface will ask`);
         m.permission = {};
       }
-      modes[name] = { ...m, label: m.label, color: m.color as ModeDef["color"], sandbox: sandbox as SandboxProfile, permission: m.permission };
+      modes[name] = { ...m, label: m.label, color: m.color as ModeDef["color"], permission: m.permission };
     }
     warnModeContradictions(name, modes[name], onError);
   }
@@ -363,10 +372,16 @@ function mergeGlobal(base: PermissionModeConfig, over: Partial<PermissionModeCon
   const plan = sanitizePlan(over.plan, onError) ?? base.plan;
   const classifier = sanitizeClassifier(over.classifier, onError);
   const mergedClassifier = classifier ? { ...(base.classifier ?? {}), ...classifier } : base.classifier;
+  let sandbox = base.sandbox;
+  if (over.sandbox !== undefined) {
+    const patch = sanitizeSandbox(over.sandbox, "global sandbox", onError);
+    sandbox = { ...(base.sandbox ?? {}), ...patch } as SandboxProfile;
+  }
   return {
     defaultMode,
     cycleOrder,
     modes,
+    ...(sandbox ? { sandbox } : {}),
     ...(plan ? { plan } : {}),
     ...(mergedClassifier ? { classifier: mergedClassifier } : {}),
   };
@@ -484,6 +499,9 @@ function applyProject(config: PermissionModeConfig, project: unknown, onError: O
   if (project.classifier !== undefined) {
     onError("permission-mode: project config cannot set classifier (reviewer settings are global); ignoring");
   }
+  if (project.sandbox !== undefined) {
+    config.sandbox = tightenSandbox(config.sandbox ?? EMPTY_SANDBOX, project.sandbox, "project sandbox", onError);
+  }
   if (project.modes !== undefined && !isPlainObject(project.modes)) {
     onError("permission-mode: project config modes must be an object; ignoring");
     return;
@@ -500,7 +518,10 @@ function applyProject(config: PermissionModeConfig, project: unknown, onError: O
         onError(`permission-mode: ${where} must be an object; ignoring`);
         continue;
       }
-      if (raw.sandbox !== undefined) base.sandbox = tightenSandbox(base.sandbox, raw.sandbox, where, onError);
+      if (raw.sandbox !== undefined) base.sandbox = tightenSandbox(base.sandbox ?? EMPTY_SANDBOX, raw.sandbox, where, onError);
+      if (raw.sandboxPin !== undefined) {
+        onError(`permission-mode: project config cannot set sandboxPin for mode "${name}"; ignoring`);
+      }
       if (raw.classifier !== undefined) {
         onError(`permission-mode: project config cannot set classifier for mode "${name}"; ignoring`);
       }
@@ -647,12 +668,10 @@ export function persistModeDomains(agentDir: string, modeName: string, domains: 
   const file = globalConfigFile(agentDir);
   if (UNSAFE_KEYS.has(modeName)) throw new Error(`invalid mode name "${modeName}"`);
   const base = loadGlobalModeConfig(agentDir);
-  const baseNetwork = hasMode(base.modes, modeName) ? base.modes[modeName].sandbox.network : undefined;
+  const baseNetwork = base.sandbox?.network;
 
   const data = readGlobalForWrite(file);
-  const modes = (data.modes ??= {}) as Record<string, { sandbox?: { network?: Record<string, unknown> } }>;
-  const mode = (modes[modeName] ??= {});
-  const sandbox = (mode.sandbox ??= {});
+  const sandbox = (data.sandbox ??= {}) as { network?: Record<string, unknown> };
   sandbox.network = {
     ...baseNetwork,
     allowedDomains: [...new Set([...(baseNetwork?.allowedDomains ?? []), ...domains])],

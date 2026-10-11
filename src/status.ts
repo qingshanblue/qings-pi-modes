@@ -3,8 +3,11 @@
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { ModeDef } from "./schema.ts";
+import type { ModeDef, SandboxProfile } from "./schema.ts";
 import { networkFiltered, type SandboxController } from "./sandbox.ts";
+
+/** Used only when a caller passes a mode without a sandbox profile (the extension always passes the effective one). */
+const NO_SANDBOX: SandboxProfile = { enabled: false, writable: true };
 
 /**
  * Render the `perm` status chip:
@@ -26,11 +29,12 @@ export function updateStatus(
   classifierLabel?: string,
 ): void {
   const t = ctx.ui.theme;
-  const enforcing = mode.sandbox.enabled && sandbox.ready;
+  const sb = mode.sandbox ?? NO_SANDBOX;
+  const enforcing = sb.enabled && sandbox.ready;
   let status = t.fg(mode.color, mode.label);
   status += " " + t.fg("dim", enforcing ? "(sandboxed in project dir, alt+m)" : "(alt+m)");
-  if (mode.sandbox.enabled && sandbox.warn && !sandbox.disabled) status += " " + t.fg("error", `(!) ${sandbox.warn}`);
-  if (enforcing && networkFiltered(mode.sandbox)) {
+  if (sb.enabled && sandbox.warn && !sandbox.disabled) status += " " + t.fg("error", `(!) ${sandbox.warn}`);
+  if (enforcing && networkFiltered(sb)) {
     status +=
       "  " + (networkOpen ? t.fg("warning", "Network: open (alt+n)") : t.fg("success", "Network: filtered (alt+n)"));
   } else if (enforcing) {

@@ -91,13 +91,12 @@ test("shipped data: history parses, covers 2.0.0 to 2.2.1, differs from the curr
   // The real regression this exists for: a 2.2.x /perm init copy still says /tmp.
   const oldCopy = JSON.parse(JSON.stringify(history[0].defaults)) as Record<string, unknown>;
   const stale = auditStaleDefaults(oldCopy, current, history);
+  // The per-mode sandbox leaves no longer exist in the decoupled defaults, so
+  // they are not compared; only `cycleOrder` (now containing automode) is stale.
   assert.deepEqual(
     stale.map((f) => f.path).sort(),
-    ["cycleOrder", ...["build", "default", "plan"].flatMap((m) => [`modes.${m}.sandbox.allowWrite`, `modes.${m}.sandbox.denyRead`])].sort(),
+    ["cycleOrder"],
   );
-  // Ranges are reported per value: allowWrite changed in 2.3.0, denyRead in 2.4.0.
-  assert.equal(stale.find((f) => f.path === "modes.build.sandbox.allowWrite")?.to, "2.2.1");
-  assert.equal(stale.find((f) => f.path === "modes.build.sandbox.denyRead")?.to, "2.3.1");
   // And a verbatim copy of the CURRENT defaults is fully silent.
   const freshCopy = JSON.parse(readFileSync(stockDefaultsFile(), "utf-8")) as Record<string, unknown>;
   assert.deepEqual(auditStaleDefaults(freshCopy, current, history), []);

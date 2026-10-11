@@ -21,7 +21,7 @@
  * host.
  */
 
-import type { ModeDef } from "./schema.ts";
+import type { ModeDef, SandboxProfile } from "./schema.ts";
 
 export interface AwarenessOptions {
   /** Whether the OS sandbox is actually enforcing (ready and not --no-sandbox). */
@@ -54,7 +54,7 @@ const renderWritePath = (p: string): string => (p === "." || p === "./" ? "the p
  */
 export function sandboxAwarenessPrompt(mode: ModeDef, opts: AwarenessOptions): string | undefined {
   if (mode.injectSandboxInfo === false) return undefined;
-  const sb = mode.sandbox;
+  const sb: SandboxProfile = mode.sandbox ?? { enabled: false, writable: true };
   if (!sb.enabled) {
     if (!opts.scratchDir) return undefined;
     return [`## Scratch directory (${mode.label})`, "", `Bash runs unsandboxed in this mode. ${scratchSentence(opts.scratchDir)}`].join("\n");

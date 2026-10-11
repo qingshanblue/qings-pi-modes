@@ -6,6 +6,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **The OS sandbox is decoupled from the mode.** The sandbox profile
+  (`allowWrite` / `denyRead` / `network` / …) now lives in a single top-level
+  `sandbox` block; a mode carries only a permission policy plus an optional
+  `sandboxPin` (`off` | `on` | `ro`). The live state is the session's `alt+s`
+  toggle (`/sandbox off|on|ro`), so a mode's approvals and the sandbox can be
+  changed independently. Switching modes no longer restarts the sandbox runtime
+  unless the effective state actually changes. A mode's own `sandbox` is kept
+  as a legacy override.
+- `Plan` pins the sandbox to `ro` (read-only); `YOLO` still pins `off` (its
+  old behavior — now expressible as an unpinnable state). The state is
+  session-persisted and forwarded to child pi processes via
+  `PI_PERMISSION_SANDBOX`; a headless child defaults to `on`.
+- New `alt+s` shortcut and `/sandbox off|on|ro` command (the old read-only
+  `/sandbox` now also sets the state); the top-level `sandbox` block and
+  per-mode `sandboxPin` are validated by the loader (a project may tighten the
+  profile but cannot set a pin).
+
 ### Added
 - **`automode` — an AI safety classifier mode (the fifth built-in).** A mode
   with `"classifier": true` routes its `ask` decisions to an LLM instead of the
