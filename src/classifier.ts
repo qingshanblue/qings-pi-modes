@@ -136,15 +136,24 @@ function boundedInput(input: unknown, maxChars: number): string {
 }
 
 export function buildReviewPrompt(subject: ClassifierSubject, maxInputChars = DEFAULT_CLASSIFIER_CONFIG.maxInputChars): { systemPrompt: string; content: string } {
+  // Ordering is deliberate for provider prefix-cache hits: the STABLE session
+  // block (mode/cwd) and the recent user requests come first, and the
+  // per-action details (surface/tool/targets/input) fill the volatile tail.
+  // Two classifier calls in the same user turn then share everything up to
+  // their first differing line.
   const lines = [
     `mode: ${subject.mode}`,
     `cwd: ${subject.cwd}`,
+  ];
+  if (subject.recentUserRequest) {
+    lines.push("user's recent requests:", subject.recentUserRequest);
+  }
+  lines.push(
     `surface: ${subject.surface}`,
     `tool: ${subject.tool}`,
     `outside project: ${subject.isOutside ? "yes" : "no"}`,
-  ];
+  );
   if (subject.targets.length > 0) lines.push(`targets: ${subject.targets.join(", ")}`);
-  if (subject.recentUserRequest) lines.push(`user's latest request: ${subject.recentUserRequest}`);
   lines.push("action input:", boundedInput(subject.input, maxInputChars));
   return { systemPrompt: SYSTEM_PROMPT, content: lines.join("\n") };
 }
