@@ -763,22 +763,25 @@ test("/perm: a bare call cycles, an unknown argument prints usage without switch
     assert.match(h.ctx.status, /^Ask /);
     await h.perm("buidl");
     assert.match(h.ctx.status, /^Ask /);
-    assert.match(h.ctx.notices.at(-1) ?? "", /unknown mode or subcommand "buidl"; usage: \/perm \[ask\|plan\|auto\|edits\|accept\|init/);
+    assert.match(h.ctx.notices.at(-1) ?? "", /unknown mode or subcommand "buidl"; usage: \/perm \[plan\|ask\|edits\|auto\|accept\|init/);
     await h.perm("");
-    assert.match(h.ctx.status, /^Plan Mode /);
+    assert.match(h.ctx.status, /^Edits /); // ask → edits (cycleOrder)
   } finally {
     h.cleanup();
   }
 });
 
-test("alt+m cycles modes and persists the choice as a session entry", { skip }, async () => {
+test("ctrl+q cycles modes and persists the choice as a session entry", { skip }, async () => {
   const h = await setup();
   try {
-    await h.pi.shortcuts.get("alt+m")!(h.ctx);
-    assert.match(h.ctx.status, /^Plan Mode /); // ask → plan (cycleOrder)
-    assert.deepEqual(h.pi.entries.at(-1), { customType: "perm-mode", data: { mode: "plan" } });
-    await h.pi.shortcuts.get("alt+m")!(h.ctx);
-    assert.match(h.ctx.status, /^Auto /); // plan → auto
+    // ask → edits → auto → accept (permission order)
+    await h.pi.shortcuts.get("ctrl+q")!(h.ctx);
+    assert.match(h.ctx.status, /^Edits /);
+    assert.deepEqual(h.pi.entries.at(-1), { customType: "perm-mode", data: { mode: "edits" } });
+    await h.pi.shortcuts.get("ctrl+q")!(h.ctx);
+    assert.match(h.ctx.status, /^Auto /);
+    await h.pi.shortcuts.get("ctrl+q")!(h.ctx);
+    assert.match(h.ctx.status, /^Accept /);
   } finally {
     h.cleanup();
   }
@@ -1329,7 +1332,7 @@ test("automode: an allowed ask runs without prompting; status shows the classifi
   const h = await setup({ permFlag: "auto", modelRegistry: registry, model: { id: "m", provider: "p" } });
   try {
     assert.match(h.ctx.status, /^Auto /);
-    assert.match(h.ctx.status, /AI:m/);
+    assert.match(h.ctx.status, /AI:current-model/);
     const res = await h.call("write", { path: "src/app.ts", content: "x" });
     assert.equal(res, undefined); // allowed, not blocked
     assert.equal(h.ctx.prompts.length, 0); // never asked the human

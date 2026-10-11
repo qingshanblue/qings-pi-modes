@@ -55,7 +55,7 @@ test("loadStockDefaults: reads the shipped JSON → five modes, correct defaults
   const c = loadStockDefaults((m) => errors.push(m));
   assert.equal(errors.length, 0, errors.join("; ")); // stock file present & valid
   assert.equal(c.defaultMode, "ask");
-  assert.deepEqual(c.cycleOrder, ["ask", "plan", "auto", "edits", "accept"]);
+  assert.deepEqual(c.cycleOrder, ["plan", "ask", "edits", "auto", "accept"]);
   assert.deepEqual(Object.keys(c.modes).sort(), ["accept", "ask", "auto", "edits", "plan"]);
   assert.ok(stockDefaultsFile().endsWith("permission-mode.defaults.json"));
 });

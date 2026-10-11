@@ -2,10 +2,10 @@
   "$schema": "./schemas/permission-mode.schema.json",
   "defaultMode": "ask",
   "cycleOrder": [
-    "ask",
     "plan",
-    "auto",
+    "ask",
     "edits",
+    "auto",
     "accept"
   ],
   "sandbox": {

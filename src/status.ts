@@ -2,18 +2,18 @@
  * Footer status indicator rendering for the current permission mode.
  *
  * Two formats: **compact** (default) is a short, readable token line
- * `Ask · sandbox:on · net:filtered · AI:haiku`; **verbose** keeps the
+ * `Auto · sandbox:on · net:filtered · AI:current-model`; **verbose** keeps the
  * fully-spelled-out form. The mode label is always shown, colored by the mode.
  *
  * Tokens (compact):
- *   mode                                             the mode label (colored)
- *   sandbox:on | read-only | off | unavailable
- *   net:filtered | open   (only while the sandbox is enforcing a network allowlist)
- *   AI:<model>            (only in classifier modes)
+ *   mode                 the mode label (colored)
+ *   sandbox:on | strict | off | unavailable   (color-coded per state)
+ *   net:filtered | open  (only while the sandbox is enforcing a network allowlist)
+ *   AI:<model>           (only in classifier modes)
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { ModeDef, SandboxProfile } from "./schema.ts";
+import type { ModeDef, SandboxProfile, SandboxState } from "./schema.ts";
 import { networkFiltered, type SandboxController } from "./sandbox.ts";
 
 /** Used only when a caller passes a mode without a sandbox profile (the extension always passes the effective one). */
@@ -26,6 +26,7 @@ export function updateStatus(
   networkOpen: boolean,
   classifierLabel?: string,
   compact = true,
+  sandboxState?: SandboxState,
 ): void {
   const t = ctx.ui.theme;
   const sb = mode.sandbox ?? NO_SANDBOX;
@@ -34,10 +35,12 @@ export function updateStatus(
   const degraded = sb.enabled && !!sandbox.warn && !sandbox.disabled;
 
   if (compact) {
-    const sbx = !sb.enabled ? "off" : !enforcing ? "unavailable" : sb.writable ? "on" : "read-only";
-    // Colors carry the meaning: green = default boundary, red = no boundary,
-    // accent = the hard boundary, warning = the sandbox could not start.
-    const sbColor = !sb.enabled ? "error" : !enforcing ? "warning" : sb.writable ? "success" : "accent";
+    // The three sandbox states are color-coded so they read at a glance:
+    // off = red (no boundary) · on = green (the default boundary) ·
+    // strict = accent (the hard boundary) · unavailable = warning.
+    const state = sandboxState ?? (sb.enabled ? "on" : "off");
+    const sbx = !sb.enabled ? "off" : !enforcing ? "unavailable" : state;
+    const sbColor = !sb.enabled ? "error" : !enforcing ? "warning" : state === "strict" ? "accent" : "success";
     const sep = t.fg("dim", " · ");
     let status = t.fg(mode.color, mode.label);
     status += sep + t.fg(sbColor, `sandbox:${sbx}`);
@@ -49,10 +52,10 @@ export function updateStatus(
 
   // Verbose: the spelled-out form.
   let status = t.fg(mode.color, mode.label);
-  status += " " + t.fg("dim", enforcing ? "(sandboxed in project dir, alt+m)" : "(alt+m)");
+  status += " " + t.fg("dim", enforcing ? "(sandboxed in project dir, ctrl+q)" : "(ctrl+q)");
   if (degraded) status += " " + t.fg("error", `(!) ${sandbox.warn}`);
   if (netEnabled) {
-    status += "  " + (networkOpen ? t.fg("warning", "Network: open (alt+n)") : t.fg("success", "Network: filtered (alt+n)"));
+    status += "  " + (networkOpen ? t.fg("warning", "Network: open (ctrl+n)") : t.fg("success", "Network: filtered (ctrl+n)"));
   } else if (enforcing) {
     status += "  " + t.fg("dim", "Network: unrestricted");
   } else {

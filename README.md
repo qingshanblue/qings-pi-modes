@@ -13,7 +13,7 @@ coding agent. Each mode is a JSON bundle of an **OS-level sandbox profile**
 surface (bash, file tools, the project boundary, web search, extension tools,
 skills). Bash gating uses a real **tree-sitter** AST, not a regex.
 
-Five modes ship by default - **Ask → Plan Mode → Auto → Edits → Accept** - and
+Five modes ship by default - **Plan → Ask → Edits → Auto → Accept** - and
 you can retune them or add your own in `permission-mode.json`.
 
 See [SECURITY.md](SECURITY.md) for the threat model,
@@ -479,7 +479,7 @@ Modes are data, layered in this order:
 {
   "$schema": "https://raw.githubusercontent.com/qingshanblue/qings-pi-modes/main/schemas/permission-mode.schema.json",
   "defaultMode": "ask",
-  "cycleOrder": ["ask", "plan", "auto", "edits", "accept"],
+  "cycleOrder": ["plan", "ask", "edits", "auto", "accept"],
   "sandbox": {                         // the shared OS-sandbox profile (one place; global-only)
     "allowWrite": [".", "/tmp/pi"],  // the sandbox state (ctrl+s) toggles confinement around this profile
     "denyRead": ["~/.ssh", "~/.aws", "~/.gnupg"],

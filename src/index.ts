@@ -239,10 +239,8 @@ export default async function (pi: ExtensionAPI) {
   const classifierChip = (ctx: ExtensionContext, m: ModeDef): string | undefined => {
     if (!m.classifier) return undefined;
     const cfg = normalizeClassifierConfig(config.classifier);
-    if (!cfg.enabled) return "AI off";
-    const ref = cfg.model === "current" ? (ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "current") : cfg.model;
-    const short = ref.includes("/") ? ref.slice(ref.indexOf("/") + 1) : ref;
-    return `AI:${short}`;
+    if (!cfg.enabled) return "AI:off";
+    return `AI:${cfg.model === "current" ? "current-model" : cfg.model}`;
   };
 
   /** Render the `perm` status chip, appending the classifier chip in AI modes. */
@@ -259,6 +257,7 @@ export default async function (pi: ExtensionAPI) {
       networkOpen,
       classifierChip(ctx, m),
       (config.statusFormat ?? "compact") === "compact",
+      effectiveSandboxState(m),
     );
   // One-step plan approval (plan-approval.ts): the plan show_plan rendered
   // last is offered for approval when the agent goes idle (A), confirmed on a
