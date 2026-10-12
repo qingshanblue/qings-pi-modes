@@ -186,7 +186,7 @@ export default async function (pi: ExtensionAPI) {
   // effective profile's denyRead so the OS sandbox masks them for bash, and
   // checked directly for the (unsandboxed) file tools.
   const blocked = new BlockedPaths();
-  // The sandbox is DECOUPLED from the mode: `ctrl+m` cycles this session state
+  // The sandbox is DECOUPLED from the mode: `alt+m` cycles this session state
   // (`off` / `on` / `ro`), and a mode may pin it (`sandboxPin`, e.g. Plan → ro).
   // The shared profile (allowWrite / denyRead / network / …) lives in
   // `config.sandbox`; a mode's own legacy `sandbox` still overrides it.
@@ -912,7 +912,7 @@ export default async function (pi: ExtensionAPI) {
     },
   });
 
-  /** Set the session sandbox state (ctrl+m / /sandbox off|on|strict). */
+  /** Set the session sandbox state (alt+m / /sandbox off|on|strict). */
   const setSandboxState = async (state: SandboxState, ctx: ExtensionContext, persist = true): Promise<void> => {
     uiCtx = ctx;
     sessionSandboxState = state;
@@ -971,7 +971,7 @@ export default async function (pi: ExtensionAPI) {
         const order: SandboxState[] = ["off", "on", "strict"];
         const state = effectiveSandboxState(currentMode());
         const options = order.map((s) => `${s === state ? "✓" : " "} ${hints[s]}`);
-        const picked = await ctx.ui.select("Sandbox boundary (ctrl+m cycles)", options);
+        const picked = await ctx.ui.select("Sandbox boundary (alt+m cycles)", options);
         const idx = picked ? order.findIndex((s) => picked.startsWith(`✓ ${hints[s]}`) || picked.startsWith(`  ${hints[s]}`)) : -1;
         if (idx >= 0) await setSandboxState(order[idx], ctx);
         return;
@@ -1005,7 +1005,7 @@ export default async function (pi: ExtensionAPI) {
       );
     },
   });
-  pi.registerShortcut("ctrl+m", {
+  pi.registerShortcut("alt+m", {
     description: "Cycle sandbox state (off → on → strict)",
     handler: cycleSandbox,
   });

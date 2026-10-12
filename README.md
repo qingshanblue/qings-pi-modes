@@ -11,7 +11,7 @@
 | 轴 | 快捷键 | 内容 |
 |---|---|---|
 | **审批模式** | `ctrl+q` | 谁来批准 `ask`：人工 / AI 分类器 / 自动接受 |
-| **沙箱边界** | `ctrl+m` | OS 级沙箱的**三态**：只管「工作目录之外的读写」|
+| **沙箱边界** | `alt+m` | OS 级沙箱的**三态**：只管「工作目录之外的读写」|
 | **网络** | `ctrl+n` | 域名过滤：`filtered ⇄ open`（独立于沙箱与模式）|
 
 三条轴**完全正交**：切模式不重启沙箱、切沙箱不改审批、切网络不影响其它——footer 状态条是唯一事实来源。
@@ -90,14 +90,14 @@ sudo apt install -y bubblewrap socat ripgrep
 | **ask** `●` | 每个变更类操作都问你：`bash`/`edit`/`write`/web 搜索/扩展工具。读免费；白名单内的只读 bash 免问。批准的项目内 `bash` 在**沙箱内**运行。 |
 | **edits** `✎` | 项目内 `edit`/`write` **不再确认**（= Claude Code 的 accept-edits）；`bash` 仍逐条询问。项目内 `bash` 在**沙箱内**运行。 |
 | **auto** `▶` | 读免费；`bash`/`edit`/`write`、越界访问、web 搜索、扩展工具交给 **AI 安全分类器**判定而非逐条问你（见 [AI auto 模式](#ai-auto-模式)）。在**沙箱内**运行。 |
-| **accept** `⚡` | **从不询问**（自动接受所有策略决定）——但仍**受沙箱边界约束**：`ctrl+m` 决定它能触达什么。无保护路径兜底。 |
+| **accept** `⚡` | **从不询问**（自动接受所有策略决定）——但仍**受沙箱边界约束**：`alt+m` 决定它能触达什么。无保护路径兜底。 |
 
 - 循环顺序 = 权限从低到高：`plan → ask → edits → auto → accept`。
 - 模式是**数据**：可在 `permission-mode.json` 里调整或新增（见[配置](#配置)）。
 
 ### ② 沙箱边界（三态，只管「工作目录外」）
 
-沙箱只有一个职责：**项目边界**。`ctrl+m` 循环三档（`/sandbox off|on|strict` 直达，`/sandbox status` 看详情）：
+沙箱只有一个职责：**项目边界**。`alt+m` 循环三档（`/sandbox off|on|strict` 直达，`/sandbox status` 看详情）：
 
 | 档 | 外路径读 | 外路径写 | 项目内 | 越界处理 |
 |---|---|---|---|---|
@@ -112,7 +112,7 @@ sudo apt install -y bubblewrap socat ripgrep
   文件工具不会把它们当越界（沙箱 `off` = 一切照旧，只是没有 OS 约束）。
 - 会话状态持久化（`/reload`、resume、分支导航都保留），并转发给子 agent
   （`PI_PERMISSION_SANDBOX`）；headless 子进程无转发值时默认 `on`。
-- 模式可用 `sandboxPin` 钉住某档（覆盖 `ctrl+m`，离开该模式恢复会话状态）；
+- 模式可用 `sandboxPin` 钉住某档（覆盖 `alt+m`，离开该模式恢复会话状态）；
   内置模式都不使用它，保留给自定义模式。
 
 ### ③ 网络（独立轴）
@@ -275,7 +275,7 @@ Tier 2   其余 ask                        → 模型审批
 | 快捷键 | 作用 |
 |---|---|
 | `ctrl+q` | 循环审批模式：`plan → ask → edits → auto → accept` |
-| `ctrl+m` | 循环沙箱态：`off → on → strict` |
+| `alt+m` | 循环沙箱态：`off → on → strict` |
 | `ctrl+n` | 切换网络过滤：`filtered ⇄ open` |
 
 ## 命令
