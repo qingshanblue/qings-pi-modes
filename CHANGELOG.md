@@ -4,81 +4,82 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## qings-pi-modes 1.0.0 — 2026-10-12
 
-### Changed
-- **The classifier now sees the user's latest request.** It previously judged
-  the raw action alone and over-denied legitimate work (e.g. editing the
-  extension's own tests); the pending action is now reviewed together with the
-  most recent user message (truncated).
-- **The in-bounds set no longer depends on the sandbox state.** With the sandbox
-  `off`, the session scratch dir and `/tmp/pi` stay in-bounds for the file tools
-  (previously they turned into "outside" and every scratch write was gated).
-- **Switching no longer prints a notice above the editor** — the footer chip is
-  the single source of truth, and its sandbox token is color-coded per state
-  (off = red, on = green, strict = accent, unavailable = warning).
-- **The sandbox is reduced to the project boundary, with three hardness levels**
-  (`ctrl+s`): `off` (no OS confinement) / `on` (outside writes blocked, reads
-  allowed) / `strict` (outside read AND write blocked at the policy layer). The
-  former read-only (`ro`) state is gone — Plan's read-only bash is now enforced
-  by policy (mutations ask; read-only commands pass the whitelist) and its
-  `sandboxPin` removed.
-- **The network boundary is an independent axis**: a top-level `network` block
-  (`allowedDomains` / `deniedDomains` / `askOnBlockedHost`) with its own
-  `ctrl+n` toggle. NOTE: the filter is implemented by the sandbox runtime's
-  proxy, so it only applies while the sandbox is not `off`.
-- **Renamed `bypass` → `accept`** and removed its sandbox exemption: it
-  auto-accepts every policy decision but is still bounded by `ctrl+s`.
-- **Shortcuts**: `ctrl+q` cycles modes (alt+m alias), `ctrl+s` the sandbox
-  (alt+s alias), `ctrl+n` the network (alt+n alias).
-- **Compact footer by default.** The `perm` status is a short, readable token
-  line (`Auto · sandbox:on · net:filtered · AI:haiku`: mode · sandbox · network
-  · classifier). Set `"statusFormat": "verbose"` in the global config for the
-  old spelled-out form.
-- **CC-style mode set.** The shipped modes are renamed and re-scoped to
-  `ask` / `plan` / `auto` / `edits` / `bypass` (cycle `ask → plan → auto → edits
-  → bypass`): `edits` (= Claude Code's accept-edits) auto-approves project
-  internal `edit`/`write` but still asks for bash; `bypass` never prompts and no
-  longer pins the sandbox off (decoupled). `plan.approveMode` now defaults to
-  `edits`. A mode's own `sandbox` remains a legacy override.
-- **Auto gains a read-only whitelist fast path (Tier 1).** A known read-only
-  bash command (`ls`, `cat`, `grep`, `git status`, …) with no redirect or
-  substitution runs without a prompt or a model call; `ask` and `edits` share
-  the same whitelist. Escapes still never qualify.
-- **The OS sandbox is decoupled from the mode.** The sandbox profile
-  (`allowWrite` / `denyRead` / `network` / …) now lives in a single top-level
-  `sandbox` block; a mode carries only a permission policy plus an optional
-  `sandboxPin` (`off` | `on` | `ro`). The live state is the session's `alt+s`
-  toggle (`/sandbox off|on|ro`), so a mode's approvals and the sandbox can be
-  changed independently. Switching modes no longer restarts the sandbox runtime
-  unless the effective state actually changes. A mode's own `sandbox` is kept
-  as a legacy override.
-- `Plan` pins the sandbox to `ro` (read-only); `YOLO` still pins `off` (its
-  old behavior — now expressible as an unpinnable state). The state is
-  session-persisted and forwarded to child pi processes via
-  `PI_PERMISSION_SANDBOX`; a headless child defaults to `on`.
-- New `alt+s` shortcut and `/sandbox off|on|ro` command (the old read-only
-  `/sandbox` now also sets the state); the top-level `sandbox` block and
-  per-mode `sandboxPin` are validated by the loader (a project may tighten the
-  profile but cannot set a pin).
+First release of **qings-pi-modes**, a fork of
+[`pi-permission-modes`](https://github.com/wynainfo/pi-permission-modes) 2.4.1.
+Every section below `2.4.1` is the upstream history this fork starts from
+(inherited unchanged unless stated here).
 
 ### Added
-- **`automode` — an AI safety classifier mode (the fifth built-in).** A mode
-  with `"classifier": true` routes its `ask` decisions to an LLM instead of the
-  human prompt. `automode` ships sandboxed with reads free and
-  writes/bash/out-of-project/web_search/extension tools routed to the reviewer.
-  The classifier runs in-process via `ctx.modelRegistry.complete()` (pi's own
-  request-time auth), defaults to the **active session model** (`"current"`),
-  and is single-attempt with a hard timeout. It is fail-closed (errors block),
-  never auto-approves an unsandboxed run, and falls back to a human prompt after
-  `maxConsecutiveDenials` (default 3).
-- **`/classifier-model [current | <provider/model>]`** — show or switch the
-  automode classifier model; persisted to the global config's `classifier.model`.
-- Top-level `classifier` config block (`enabled`, `model`, `timeoutMs`,
-  `failClosed`, `maxConsecutiveDenials`, `maxTokens`, `maxInputChars`) and a
-  per-mode `classifier` boolean. Global-only: a project config cannot set them.
-- The footer shows the reviewer in classifier modes (e.g. `AI:claude-haiku-4-5`).
-- `automode` joins the `alt+m` cycle: `default → plan → build → automode → yolo`.
+- **Three independent axes.** Permission mode (`alt+m`), sandbox boundary
+  (`alt+s`: `off` / `on` / `strict`) and network filtering (`alt+n`: `limit` /
+  `free`) are decoupled — switching one never changes another. Only the mode
+  decides *who* approves an `ask`; only the sandbox decides what the OS allows.
+- **AI classifier modes (`auto`).** A mode with `"classifier": true` routes its
+  `ask` decisions to an in-process LLM reviewer instead of the human prompt:
+  `ctx.modelRegistry.complete()` (pi's own request-time auth), the active
+  session model by default (`/classifier-model` switches it, persisted),
+  single attempt with a hard timeout, a verdict cache, and a fallback to human
+  prompting after `maxConsecutiveDenials` (default 3). The reviewer sees the
+  pending action together with the user's most recent messages — judging the
+  raw action alone over-denied legitimate work. Top-level `classifier` block;
+  global-only, so a project config cannot swap the reviewer for a weaker model.
+- **Tier-1 read-only whitelist** for bash (45+ commands, 19 read-only git
+  subcommands; no redirects or command substitution qualify). A known read-only
+  command runs without a model call in `auto` and without a prompt in `ask` /
+  `edits`.
+- **Dual-surface approvals.** With `@kdejaeger/pi-telegram-plus` installed and
+  connected, an approval renders as a terminal overlay *and* a Telegram button
+  card — the first answer wins and the other surface is retired. Built on public
+  extension APIs only (`pi.events` + `ctx.ui.custom()`), no fork of that plugin;
+  without it the prompt is a plain terminal overlay. Known upstream limits: no
+  "deny and block path" button on Telegram, and "allow forever" only appears for
+  path-shaped asks.
+- **Interactive command pickers.** `/permission`, `/network` and `/sandbox` with
+  no argument open a picker (current state marked; Esc dismisses without
+  changing anything). `/sandbox status` keeps the detailed report.
+- `RELEASING.md` — the npm release flow and the pi.dev gallery rules.
+
+### Changed
+- **Modes re-scoped to a Claude-Code-style set**, cycling low → high permission:
+  `plan` → `ask` → `edits` → `auto` → `accept`. `accept` replaces the former
+  `bypass` and its sandbox exemption stays removed: it auto-accepts every policy
+  decision but is still bounded by the sandbox state. `plan.approveMode`
+  defaults to `edits`.
+- **The sandbox is the project boundary only**, with three hardness levels:
+  `off` (no OS confinement), `on` (outside writes blocked; outside reads allowed
+  with secrets masked), `strict` (outside read *and* write blocked at the policy
+  layer — bubblewrap must still read system libraries). The former read-only
+  (`ro`) state is gone: Plan's read-only bash is enforced by policy (read-only
+  commands pass the whitelist, mutations ask). Built-in modes no longer pin the
+  sandbox.
+- **The network boundary is a top-level `network` block**
+  (`allowedDomains` / `deniedDomains` / `askOnBlockedHost`). The filter is the
+  sandbox runtime's proxy, so it applies while the sandbox is not `off`; the
+  `free` posture widens the proxy's allowlist rather than removing the boundary
+  (raw sockets such as SSH stay inside it).
+- **One consistent `alt` shortcut family**: `alt+m` cycles modes, `alt+s` cycles
+  the sandbox, `alt+n` toggles network filtering. No aliases. `ctrl+<letter>` is
+  not usable here: all 26 are taken by pi or collide with control bytes
+  (`ctrl+m` *is* Enter, `ctrl+i` is Tab, `ctrl+j` is LF, `ctrl+h` is BS).
+- **Full command names**: `/perm` → `/permission`, `/net` → `/network`.
+- **Compact footer by default**: a short token line such as
+  `Auto box:on net:limit AI:inherit` (mode, sandbox, network, reviewer) with
+  per-token colors derived from risk. `"statusFormat": "verbose"` restores the
+  spelled-out form. Switching a mode / sandbox / network no longer prints a
+  notice — the footer is the single source of truth.
+- **`classifier.failClosed` defaults to `true`**: a classifier error, timeout, or
+  unparsable verdict blocks the operation (with a warning notice) rather than
+  falling back to a prompt nobody may be present to answer. Set
+  `"classifier": { "failClosed": false }` to opt into the human fallback.
+- The in-bounds set no longer depends on the sandbox state: with the sandbox
+  `off`, the session scratch directory and `/tmp/pi` stay in-bounds for the file
+  tools instead of turning every scratch write into an approval.
+- Documentation is Chinese (README, plan, RELEASING); code comments stay English.
+
+### Fixed
+- Inherits the upstream `2.4.1` fixes below. No fork-specific fixes yet.
 
 ## [2.4.1]
 
