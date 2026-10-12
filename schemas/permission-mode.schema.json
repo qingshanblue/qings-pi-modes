@@ -9,7 +9,7 @@
     "$schema": { "type": "string" },
     "$comment": {
       "type": "string",
-      "description": "Free-form note, ignored by the loader. /perm init writes the copy's provenance here."
+      "description": "Free-form note, ignored by the loader. /permission init writes the copy's provenance here."
     },
     "acknowledgeDefaults": {
       "type": "string",
@@ -26,7 +26,21 @@
     },
     "sandbox": {
       "$ref": "#/$defs/sandbox",
-      "description": "The shared OS-sandbox profile (allowWrite / denyRead / network / …). Global-only authority; a project may only tighten it. `enabled`/`writable` here are the sensible defaults; the live state is the `alt+s` toggle (\"off\" | \"on\" | \"ro\"), which a mode may pin via `sandboxPin`."
+      "description": "The shared OS-sandbox profile (allowWrite / denyRead / network / …). Global-only authority; a project may only tighten it. `enabled`/`writable` here are the legacy defaults; the live state is the `alt+s` toggle (\"off\" | \"on\" | \"strict\"), which a mode may pin via `sandboxPin` (no built-in mode does)."
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The network boundary — an independent axis (alt+n toggles it for the session). The filter is the sandbox runtime's proxy, so it applies while the sandbox is not `off`; `free` widens the proxy's allowlist rather than removing the boundary.",
+      "properties": {
+        "allowedDomains": { "type": "array", "items": { "type": "string" } },
+        "deniedDomains": { "type": "array", "items": { "type": "string" } },
+        "askOnBlockedHost": { "type": "boolean", "description": "Ask the user live when bash reaches a host outside the allowlist (default true). false = silent deny. Projects may set false, never true." }
+      }
+    },
+    "statusFormat": {
+      "enum": ["compact", "verbose"],
+      "description": "Footer status style: `compact` (default, a short token line such as \"Auto box:on net:limit AI:inherit\") or `verbose` (the spelled-out form)."
     },
     "modes": {
       "type": "object",
@@ -38,7 +52,7 @@
       "additionalProperties": false,
       "description": "One-step plan approval (the Accept / Decline prompt after show_plan, the confirm on switching to the approve mode, /plan approve). Global config only.",
       "properties": {
-        "approveMode": { "type": "string", "description": "Mode to switch to when a plan is accepted. Default: build." },
+        "approveMode": { "type": "string", "description": "Mode to switch to when a plan is accepted. Default: edits." },
         "approveMessage": { "type": "string", "description": "User message that starts the implementing turn; {path} is replaced by the plan path. Default: The plan in `{path}` is approved. Implement it now." }
       }
     },
@@ -122,7 +136,7 @@
         "systemPrompt": { "type": "string", "description": "System prompt to inject; '@plan' resolves to the dated Plan-mode prompt." },
         "injectSandboxInfo": { "type": "boolean", "description": "Inject the mode's sandbox boundaries (writable paths, denied reads, network allowlist) into the system prompt each turn (default true). Modes with sandbox.enabled:false never inject." },
         "sandbox": { "$ref": "#/$defs/sandbox", "description": "Legacy per-mode sandbox override. Prefer the top-level `sandbox`; kept for backward compatibility." },
-        "sandboxPin": { "enum": ["off", "on", "ro"], "description": "Force the sandbox state while this mode is active (overrides the `alt+s` session toggle, restored on leaving). Only Plan ships one (`ro`)." },
+        "sandboxPin": { "enum": ["off", "on", "strict"], "description": "Force the sandbox state while this mode is active (overrides the `alt+s` session toggle, restored on leaving). No built-in mode ships one; the stock modes rely on the session state." },
         "permission": { "$ref": "#/$defs/permission" },
         "hideTools": { "type": "array", "items": { "type": "string" }, "description": "Tools hidden from the model in this mode." },
         "bypassProtectedPaths": { "type": "boolean", "description": "Skip the .git/.env/dotfile write backstop (only trusted modes)." },
