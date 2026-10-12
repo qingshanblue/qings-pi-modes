@@ -28,7 +28,7 @@ export interface AwarenessOptions {
   active: boolean;
   /** Why it isn't, when a sandboxed mode runs degraded (warn text / --no-sandbox). */
   reason?: string;
-  /** `/network open` / ctrl+n: domain filtering suspended for this session. */
+  /** `/network open` / alt+n: domain filtering suspended for this session. */
   networkOpen?: boolean;
   /** Session-granted domains (via prompts, /network allow, request_network_access). */
   sessionDomains?: string[];

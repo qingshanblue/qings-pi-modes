@@ -18,17 +18,17 @@ test("updateStatus (verbose): filtered / open / unrestricted / degraded", () => 
   const ready = { ready: true, warn: undefined, disabled: false };
   let c = ctx();
   updateStatus(c as never, mode({ enabled: true, writable: true, network: { allowedDomains: ["a.com"] } }), ready, false, undefined, false, "on");
-  assert.equal(c.status, "Build (sandboxed in project dir, ctrl+q)  Network: filtered (ctrl+n)");
+  assert.equal(c.status, "Build (sandboxed in project dir, alt+m)  Network: filtered (alt+n)");
   c = ctx();
   updateStatus(c as never, mode({ enabled: true, writable: true, network: { allowedDomains: [] } }), ready, true, undefined, false, "on");
-  assert.equal(c.status, "Build (sandboxed in project dir, ctrl+q)  Network: open (ctrl+n)");
+  assert.equal(c.status, "Build (sandboxed in project dir, alt+m)  Network: open (alt+n)");
   // No allowlist configured: the runtime does not filter, and the chip must not claim it does.
   c = ctx();
   updateStatus(c as never, mode({ enabled: true, writable: true }), ready, false, undefined, false, "on");
-  assert.equal(c.status, "Build (sandboxed in project dir, ctrl+q)  Network: unrestricted");
+  assert.equal(c.status, "Build (sandboxed in project dir, alt+m)  Network: unrestricted");
   c = ctx();
   updateStatus(c as never, mode({ enabled: true, writable: true, network: { allowedDomains: ["a.com"] } }), { ready: false, warn: "sandbox init failed", disabled: false }, false, undefined, false, "on");
-  assert.equal(c.status, "Build (ctrl+q) (!) sandbox init failed  Network: open");
+  assert.equal(c.status, "Build (alt+m) (!) sandbox init failed  Network: open");
 });
 
 test("updateStatus (compact, default): box / net / AI tokens", () => {

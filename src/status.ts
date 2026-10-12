@@ -8,7 +8,7 @@
  * Tokens (compact), `-`-separated:
  *   mode                 the mode label (colored)
  *   box:on | strict | off | unavailable   (color-coded per state)
- *   net:limit | free     (the domain-allowlist toggle — ctrl+n; only while the
+ *   net:limit | free     (the domain-allowlist toggle — alt+n; only while the
  *                         sandbox is enforcing; the NETWORK itself is never off)
  *   AI:inherit | AI:<model>   (only in classifier modes)
  */
@@ -54,10 +54,10 @@ export function updateStatus(
 
   // Verbose: the spelled-out form.
   let status = t.fg(mode.color, mode.label);
-  status += " " + t.fg("dim", enforcing ? "(sandboxed in project dir, ctrl+q)" : "(ctrl+q)");
+  status += " " + t.fg("dim", enforcing ? "(sandboxed in project dir, alt+m)" : "(alt+m)");
   if (degraded) status += " " + t.fg("error", `(!) ${sandbox.warn}`);
   if (netEnabled) {
-    status += "  " + (networkOpen ? t.fg("warning", "Network: open (ctrl+n)") : t.fg("success", "Network: filtered (ctrl+n)"));
+    status += "  " + (networkOpen ? t.fg("warning", "Network: open (alt+n)") : t.fg("success", "Network: filtered (alt+n)"));
   } else if (enforcing) {
     status += "  " + t.fg("dim", "Network: unrestricted");
   } else {

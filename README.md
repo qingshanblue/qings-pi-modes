@@ -10,9 +10,9 @@
 
 | 轴 | 快捷键 | 内容 |
 |---|---|---|
-| **审批模式** | `ctrl+q` | 谁来批准 `ask`：人工 / AI 分类器 / 自动接受 |
-| **沙箱边界** | `alt+m` | OS 级沙箱的**三态**：只管「工作目录之外的读写」|
-| **网络** | `ctrl+n` | 域名过滤：`filtered ⇄ open`（独立于沙箱与模式）|
+| **审批模式** | `alt+m` | 谁来批准 `ask`：人工 / AI 分类器 / 自动接受 |
+| **沙箱边界** | `alt+s` | OS 级沙箱的**三态**：只管「工作目录之外的读写」|
+| **网络** | `alt+n` | 域名过滤：`filtered ⇄ open`（独立于沙箱与模式）|
 
 三条轴**完全正交**：切模式不重启沙箱、切沙箱不改审批、切网络不影响其它——footer 状态条是唯一事实来源。
 
@@ -70,7 +70,7 @@ sudo apt install -y bubblewrap socat ripgrep
 ### 验证
 
 1. 在任意项目启动 pi —— footer 显示模式指示，如 `Ask`；
-2. 切到 Edits（`ctrl+q` 直到 `Edits`，或 `/permission edits`）：
+2. 切到 Edits（`alt+m` 直到 `Edits`，或 `/permission edits`）：
    - 沙箱可用 → `Edits · sandbox:on …`；
    - 否则 → `Edits · sandbox:unavailable` + 修复提示；
 3. `/sandbox` 打印当前沙箱配置（或不可用的原因）。
@@ -81,7 +81,7 @@ sudo apt install -y bubblewrap socat ripgrep
 
 ### ① 模式（审批自动化级别）
 
-`ctrl+q` 循环（按权限从低到高），`/permission <mode>` 直达，`/permission` 弹出选择器。当前模式随会话持久化
+`alt+m` 循环（按权限从低到高），`/permission <mode>` 直达，`/permission` 弹出选择器。当前模式随会话持久化
 （`/reload`、resume、分支导航都保留），显示在 footer。
 
 | 模式 | 行为 |
@@ -97,7 +97,7 @@ sudo apt install -y bubblewrap socat ripgrep
 
 ### ② 沙箱边界（三态，只管「工作目录外」）
 
-沙箱只有一个职责：**项目边界**。`alt+m` 循环三档（`/sandbox off|on|strict` 直达，`/sandbox status` 看详情）：
+沙箱只有一个职责：**项目边界**。`alt+s` 循环三档（`/sandbox off|on|strict` 直达，`/sandbox status` 看详情）：
 
 | 档 | 外路径读 | 外路径写 | 项目内 | 越界处理 |
 |---|---|---|---|---|
@@ -117,7 +117,7 @@ sudo apt install -y bubblewrap socat ripgrep
 
 ### ③ 网络（独立轴）
 
-见[网络](#network)。域名 allowlist 与「谁审批」「沙箱档」都无关，`ctrl+n` 随时切换。
+见[网络](#network)。域名 allowlist 与「谁审批」「沙箱档」都无关，`alt+n` 随时切换。
 
 ### ④ AI 审批（auto 模式的闸门）
 
@@ -146,7 +146,7 @@ Plan ready: plan/2026-09-24_feature.md
 
 两条兜底路径覆盖其它入口：
 
-- 计划 pending 期间手动切进批准模式（`ctrl+q`、`/permission edits`）会问
+- 计划 pending 期间手动切进批准模式（`alt+m`、`/permission edits`）会问
   `Implement plan/... now?`；No 留在 Edits，什么都不发。
 - **`/plan approve`** 直接切换并发送，不再询问；**`/plan status`** 显示 pending 的计划。
 
@@ -188,9 +188,9 @@ touch，长会话不会被并发会话清扫掉。base 下的文件与符号链�
 这不是一堵静默的墙——访问 allowlist 之外的主机时**会暂停并询问你**
 （*Allow for session / Allow forever / Deny*），然后放行或失败：
 
-- **`ctrl+n`** 切换本会话的过滤：footer 上 `net:limit`（黄）⇄ `net:free`（绿）；
+- **`alt+n`** 切换本会话的过滤：footer 上 `net:limit`（黄）⇄ `net:free`（绿）；
 - **`/network`** —— `status`（allowlist、会话授权/拒绝）、`allow <domain…>`（会话级授权）、
-  `open` / `restrict`（同 `ctrl+n`）、`reset`（清空会话授权/拒绝）；
+  `open` / `restrict`（同 `alt+n`）、`reset`（清空会话授权/拒绝）；
 - 模型有 **`request_network_access`** 工具：它列出域名与理由，你批准或拒绝——
   一次可覆盖多个域名（比如一次安装需要的所有主机）。被拒的主机本会话保持拒绝
   （避免安装器反复重试造成的弹窗风暴），被拦的主机会在命令输出里报告，
@@ -274,9 +274,9 @@ Tier 2   其余 ask                        → 模型审批
 
 | 快捷键 | 作用 |
 |---|---|
-| `ctrl+q` | 循环审批模式：`plan → ask → edits → auto → accept` |
-| `alt+m` | 循环沙箱态：`off → on → strict` |
-| `ctrl+n` | 切换网络过滤：`filtered ⇄ open` |
+| `alt+m` | 循环审批模式：`plan → ask → edits → auto → accept` |
+| `alt+s` | 循环沙箱态：`off → on → strict` |
+| `alt+n` | 切换网络过滤：`filtered ⇄ open` |
 
 ## 命令
 
@@ -385,7 +385,7 @@ Tier 2   其余 ask                        → 模型审批
     "allowRead": [],                   // 在 denyRead 内重新可读（见下方"Strict home"）
     "denyWrite": []
   },
-  "network": {                         // 网络边界 —— 独立轴（ctrl+n）
+  "network": {                         // 网络边界 —— 独立轴（alt+n）
     "allowedDomains": ["github.com", "*.github.com"],
     "deniedDomains": [],
     "askOnBlockedHost": true           // allowlist 外的主机实时询问（false = 静默拒绝）

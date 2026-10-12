@@ -1,7 +1,7 @@
 /**
  * Permission Mode extension
  *
- * Switchable, data-driven permission modes (cycle with ctrl+q or /permission). A MODE
+ * Switchable, data-driven permission modes (cycle with alt+m or /permission). A MODE
  * is a JSON bundle of a sandbox profile + an allow/ask/deny permission policy +
  * UI metadata, defined in `schema.ts` (built-in defaults) and overridable in
  * `permission-mode.json`. The four shipped modes:
@@ -168,7 +168,7 @@ export default async function (pi: ExtensionAPI) {
   // True when the current mode was auto-picked as the headless-child safety
   // fallback (no --perm flag, session entry, or forwarded env). The mode's
   // POLICY fully applies, but its systemPrompt is not injected — a planning
-  // prompt steering a headless worker to write plan files and ask about ctrl+q
+  // prompt steering a headless worker to write plan files and ask about alt+m
   // would misdirect it — and the fallback isn't exported to child processes
   // as if it were an explicit choice (children re-derive their own fallback).
   let fallbackMode = false;
@@ -568,7 +568,7 @@ export default async function (pi: ExtensionAPI) {
     applyToolVisibility();
     updateStatus(ctx, m, sandbox, net.open);
     if (persist) pi.appendEntry<PermState>("perm-mode", { mode: modeName });
-    // B: a manual switch into the approve mode while a plan is pending (ctrl+q,
+    // B: a manual switch into the approve mode while a plan is pending (alt+m,
     // /perm <mode>). Not on session_start/resume (persist=false) and not for
     // the switch approvePlan itself performs.
     if (persist && pendingPlan && !approvingPlan && ctx.hasUI && name !== previous && name === approveModeName()) {
@@ -620,7 +620,7 @@ export default async function (pi: ExtensionAPI) {
     // agent_end fires while the run still counts as streaming (it settles
     // after its listeners), and a plain send throws then. A follow-up is
     // queued behind the finishing run and pi starts a fresh run for it; when
-    // the agent is idle (B via ctrl+q, /plan approve) it is sent right away.
+    // the agent is idle (B via alt+m, /plan approve) it is sent right away.
     pi.sendUserMessage(approvalMessage(config.plan?.approveMessage, plan.path), { deliverAs: "followUp" });
     return true;
   };
@@ -689,7 +689,7 @@ export default async function (pi: ExtensionAPI) {
     return { name: resolved ?? modeName, fallback: false };
   };
 
-  pi.registerShortcut("ctrl+q", {
+  pi.registerShortcut("alt+m", {
     description: `Cycle permission mode (${config.cycleOrder.join(" -> ")})`,
     handler: async (ctx) => cycle(ctx),
   });
@@ -700,7 +700,7 @@ export default async function (pi: ExtensionAPI) {
       if (arg === "") {
         if (!ctx.hasUI) return ctx.ui.notify(`permission-mode: usage: /permission [${config.cycleOrder.join("|")}|init|clear-approvals|blocks|unblock <path>]`, "warning");
         const options = config.cycleOrder.map((name) => `${name === modeName ? "✓" : " "} ${config.modes[name]?.label ?? name}`);
-        const picked = await ctx.ui.select("Permission mode (ctrl+q cycles)", options);
+        const picked = await ctx.ui.select("Permission mode (alt+m cycles)", options);
         const idx = picked ? options.indexOf(picked) : -1;
         if (idx >= 0) await setMode(config.cycleOrder[idx], ctx);
         return;
@@ -823,7 +823,7 @@ export default async function (pi: ExtensionAPI) {
     updateStatus(ctx, currentMode(), sandbox, net.open);
   };
 
-  pi.registerShortcut("ctrl+n", {
+  pi.registerShortcut("alt+n", {
     description: "Toggle network filtering for this session (filtered <-> open)",
     handler: toggleNetwork,
   });
@@ -861,7 +861,7 @@ export default async function (pi: ExtensionAPI) {
           `${!net.open ? "✓" : " "} Limit to the allowlist (net:limit)`,
           `${net.open ? "✓" : " "} Free — no filtering this session (net:free)`,
         ];
-        const picked = await ctx.ui.select("Network filtering (ctrl+n toggles)", options);
+        const picked = await ctx.ui.select("Network filtering (alt+n toggles)", options);
         if (picked) {
           const wantOpen = picked.includes("net:free");
           if (wantOpen !== net.open) toggleNetwork(ctx);
@@ -898,8 +898,8 @@ export default async function (pi: ExtensionAPI) {
       const state = !networkEnforcing()
         ? "OPEN — nothing filters in this mode/state"
         : net.open
-          ? "OPEN for this session (/network restrict or ctrl+n to re-enable filtering)"
-          : "filtered (ctrl+n or /network open to disable)";
+          ? "OPEN for this session (/network restrict or alt+n to re-enable filtering)"
+          : "filtered (alt+n or /network open to disable)";
       return ctx.ui.notify(
         [
           `Network (${m.label}): ${state}`,
@@ -912,7 +912,7 @@ export default async function (pi: ExtensionAPI) {
     },
   });
 
-  /** Set the session sandbox state (alt+m / /sandbox off|on|strict). */
+  /** Set the session sandbox state (alt+s / /sandbox off|on|strict). */
   const setSandboxState = async (state: SandboxState, ctx: ExtensionContext, persist = true): Promise<void> => {
     uiCtx = ctx;
     sessionSandboxState = state;
@@ -971,7 +971,7 @@ export default async function (pi: ExtensionAPI) {
         const order: SandboxState[] = ["off", "on", "strict"];
         const state = effectiveSandboxState(currentMode());
         const options = order.map((s) => `${s === state ? "✓" : " "} ${hints[s]}`);
-        const picked = await ctx.ui.select("Sandbox boundary (alt+m cycles)", options);
+        const picked = await ctx.ui.select("Sandbox boundary (alt+s cycles)", options);
         const idx = picked ? order.findIndex((s) => picked.startsWith(`✓ ${hints[s]}`) || picked.startsWith(`  ${hints[s]}`)) : -1;
         if (idx >= 0) await setSandboxState(order[idx], ctx);
         return;
@@ -990,7 +990,7 @@ export default async function (pi: ExtensionAPI) {
           `Sandbox: ACTIVE for ${m.label} (state: ${effectiveSandboxState(m)})`,
           "",
           `Scratch dir: ${scratchDir ?? "(none)"}`,
-          `Network: ${net.open ? "OPEN for this session (ctrl+n)" : "filtered (ctrl+n)"}`,
+          `Network: ${net.open ? "OPEN for this session (alt+n)" : "filtered (alt+n)"}`,
           `Network allowed: ${c.network?.allowedDomains?.join(", ") || "(none)"}`,
           `Session grants: ${net.grants().join(", ") || "(none)"}`,
           `Deny read:  ${c.filesystem?.denyRead?.join(", ") || "(none)"}`,
@@ -1005,7 +1005,7 @@ export default async function (pi: ExtensionAPI) {
       );
     },
   });
-  pi.registerShortcut("alt+m", {
+  pi.registerShortcut("alt+s", {
     description: "Cycle sandbox state (off → on → strict)",
     handler: cycleSandbox,
   });

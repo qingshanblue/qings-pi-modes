@@ -173,7 +173,7 @@ export interface NetworkConfig {
 export interface PermissionModeConfig {
   $schema?: string;
   defaultMode: string;
-  /** ctrl+q cycle order; also the display order. */
+  /** `alt+m` cycle order; also the display order. */
   cycleOrder: string[];
   modes: Record<string, ModeDef>;
   /**
@@ -183,7 +183,7 @@ export interface PermissionModeConfig {
    */
   sandbox?: SandboxProfile;
   /**
-   * The network boundary — an INDEPENDENT axis with its own `ctrl+n` toggle.
+   * The network boundary — an INDEPENDENT axis with its own `alt+n` toggle.
    * Global-only authority; a project may only tighten it. NOTE: the filter is
    * implemented by the sandbox runtime's proxy, so it only applies while the
    * sandbox state is not `off`.
@@ -233,7 +233,7 @@ export function planModeSystemPrompt(today: string): string {
     "   displays it.",
     "4. After show_plan, do NOT summarize, recap, or describe the plan, and add no other",
     "   commentary. Your entire reply must be a single short line: ask the user to review",
-    "   the plan and accept it in the prompt that follows (or press `ctrl+q` / run `/plan approve`).",
+    "   the plan and accept it in the prompt that follows (or press `alt+m` / run `/plan approve`).",
     "",
     "For quick questions that aren't planning tasks, just answer normally.",
   ].join("\n");
