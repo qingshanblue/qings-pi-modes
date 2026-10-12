@@ -135,6 +135,9 @@ test("subjectKey: stable per action, differs by surface/input", () => {
   assert.notEqual(a, subjectKey(subject(), "anthropic/x"));
   assert.notEqual(a, subjectKey(subject({ surface: "write" }), "current"));
   assert.notEqual(a, subjectKey(subject({ input: { command: "rm -rf /" } }), "current"));
+  // The authorization context is part of the identity: a verdict justified by one
+  // request must not be reused for the same action under a different request.
+  assert.notEqual(a, subjectKey(subject({ recentUserRequest: "unrelated request" }), "current"));
 });
 
 test("denial counter: streak resets on success, trips at the limit", () => {

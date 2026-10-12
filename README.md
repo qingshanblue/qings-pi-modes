@@ -26,17 +26,29 @@ bash 门控使用真正的 **tree-sitter AST**（不是正则），OS 沙箱由
 
 ## 安装
 
+**npm（推荐）**
+
+```bash
+pi install npm:qings-pi-modes
+```
+
+- `pi install npm:qings-pi-modes@1.0.0` —— 锁定版本（`pi update` 不会越过它）
+- `pi install -l npm:qings-pi-modes` —— 项目级安装（`.pi/` 内，可与团队共享）
+- `pi -e npm:qings-pi-modes` —— 不写入配置，单次试用
+
+**git（跟随仓库）**
+
 ```bash
 pi install git:github.com/qingshanblue/qings-pi-modes
 ```
 
-`pi install` 会自动执行 `npm install`（带入 `@anthropic-ai/sandbox-runtime`、tree-sitter 等运行时依赖）；pi SDK 作为 peer dependency 由宿主提供。常用变体：
+`pi install` 会自动执行 `npm install`（带入 `@anthropic-ai/sandbox-runtime`、tree-sitter 等运行时依赖）；pi SDK 作为 peer dependency 由宿主提供。两种来源通用：
 
-- `pi install git:github.com/qingshanblue/qings-pi-modes@v2.4.1` —— 锁定 tag（`pi update` 不会越过它）
-- `pi install -l git:github.com/qingshanblue/qings-pi-modes` —— 项目级安装（`.pi/` 内，可与团队共享）
+- `pi install git:github.com/qingshanblue/qings-pi-modes@v1.0.0` —— 按 tag 锁定
 - `pi update --extensions` —— 之后拉取更新
+- `pi list` / `pi remove <source>` —— 查看 / 卸载
 
-不写入配置直接试用：
+本地开发：
 
 ```bash
 pi -e ./src/index.ts
@@ -230,6 +242,9 @@ Tier 2   其余 ask                        → 模型审批
   只读命令在哪都不烦你。逃逸永远不合格。
 - **fail-closed 默认**：分类器出错/超时/返回不可解析 → **该操作被拦**。全局配置
   `"classifier": { "failClosed": false }` 可改为降级人工弹窗。
+- **它是启发式审查，不是安全边界**：审查文本里含模型写的命令与参数，理论上可被诱导；
+  不可解析的回复一律按拒绝处理，但仍请把 `classifier: true` 的模式当作便利过滤器——
+  真正的边界是沙箱态（`alt+s`）与硬拦规则（详见 SECURITY.md）。
 - 连续拒绝达 `classifier.maxConsecutiveDenials`（默认 3）→ 转人工一次，避免卡死。
 - footer 显示 `AI:current-model`（或 `AI:<模型>`）。
 

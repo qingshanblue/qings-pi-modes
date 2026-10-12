@@ -154,6 +154,21 @@ describe("remote-ask: terminal overlay component", () => {
     assert.equal(esc, undefined);
   });
 
+  it("strips control/ANSI characters from tool-call text but returns the original value", () => {
+    let got: string | undefined;
+    const c = new AskOverlayComponent(
+      "bash wants to run \x1b[31mrm\x1b[0m \u0007now",
+      ["Allow \x1b]0;pwned\x07once", "Deny"],
+      theme,
+      (v) => (got = v),
+    );
+    const lines = c.render(80).join("\n");
+    assert.ok(!lines.includes("\x1b"), "no escape sequences reach the terminal");
+    assert.ok(!lines.includes("\u0007"), "no bell/control characters reach the terminal");
+    c.handleInput("\r"); // pick the first (highlighted) option
+    assert.equal(got, "Allow \x1b]0;pwned\x07once", "the value handed back is the original label");
+  });
+
   it("renders title, options, and hints inside the box", () => {
     const c = make(() => undefined);
     const lines = c.render(80).join("\n");

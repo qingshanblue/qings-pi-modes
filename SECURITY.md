@@ -29,6 +29,17 @@ you can rely on it appropriately.
 
 ## Known limitations (read these)
 
+- **The AI classifier (`auto` mode) is a heuristic gate, not a boundary.** It
+  reviews a pending tool call with an LLM and can be wrong in both directions.
+  Its input includes model-authored text (the command and its arguments), so a
+  crafted command could in principle try to talk it into an allow; the reviewer
+  is instructed to answer with a JSON verdict only and anything unparsable is
+  treated as a denial, but treat a `classifier: true` mode as a convenience
+  filter rather than containment. The OS sandbox state and the hard-deny paths
+  remain the boundaries. `classifier.failClosed` defaults to `true`, so an
+  error, timeout, or unparsable verdict blocks the action instead of falling
+  back to a prompt nobody may be present to answer.
+
 - **Reads are deny-listed, not allow-listed.** The sandbox blocks out-of-project
   *writes* at the kernel, but reads stay broad (so build tools work) except for
   the configured `denyRead` secrets. An out-of-project **read** in bash is gated

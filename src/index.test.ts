@@ -459,7 +459,7 @@ test("bash: a session grant never covers an escape, and an approved escape cover
     assert.equal(h.ctx.prompts.length, 1);
     // The same name reaching outside the project is an escape: it must prompt again.
     h.ctx.answers.push("Deny");
-    const escape = await h.call("bash", { command: "touch /etc/qings-x" });
+    const escape = await h.call("bash", { command: "touch /etc/pi-modes-escape" });
     assert.equal(escape?.block, true);
     assert.equal(h.ctx.prompts.length, 2);
     assert.match(h.ctx.prompts[1].title, /path outside project/);

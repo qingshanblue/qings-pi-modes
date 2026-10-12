@@ -274,7 +274,10 @@ export async function classifyAsk(opts: ClassifyAskOptions): Promise<ClassifierV
 // Verdict cache + denial counter
 // ---------------------------------------------------------------------------
 
-/** Stable key for an action under a model (identity — not safety — fields only). */
+/** Stable key for an action under a model (identity — not safety — fields only).
+ * The authorization context (the user's recent request) is part of the key: a
+ * verdict an earlier request justified must not be reused for the same action
+ * under a different request. */
 export function subjectKey(subject: ClassifierSubject, modelRef: string): string {
   let input: string;
   try {
@@ -283,7 +286,18 @@ export function subjectKey(subject: ClassifierSubject, modelRef: string): string
     input = String(subject.input);
   }
   return createHash("sha1")
-    .update([modelRef, subject.mode, subject.surface, subject.tool, subject.targets.join("\u0000"), input, subject.isOutside ? "1" : "0"].join("\u0001"))
+    .update(
+      [
+        modelRef,
+        subject.mode,
+        subject.surface,
+        subject.tool,
+        subject.targets.join("\u0000"),
+        input,
+        subject.isOutside ? "1" : "0",
+        subject.recentUserRequest ?? "",
+      ].join("\u0001"),
+    )
     .digest("hex");
 }
 

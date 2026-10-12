@@ -122,6 +122,16 @@ export function resolveAnswer(value: string | undefined, options: string[], sema
 const BOX = { tl: "╭", tr: "╮", bl: "╰", br: "╯", h: "─", v: "│" } as const;
 
 /**
+ * Strip C0 control characters (ESC included) from text we did not author: the
+ * prompt title and target paths carry tool-call text, and a crafted command
+ * must not be able to emit terminal control sequences through the overlay.
+ * Display only — the value handed back to the caller is never rewritten.
+ */
+function sanitize(text: string): string {
+  return text.replace(/[\u0000-\u001f\u007f]/g, "");
+}
+
+/**
  * Terminal side of a dual prompt: an overlay list with the same visual language
  * as pi's menus. ↑/↓ move, Enter picks, Esc denies (dismiss = deny), 1-9 pick directly.
  */
@@ -132,6 +142,8 @@ export class AskOverlayComponent {
   private selected = 0;
   private title: string;
   private options: string[];
+  private displayTitle: string;
+  private displayOptions: string[];
   private theme: Theme;
   private done: (value: string | undefined) => void;
 
@@ -140,7 +152,11 @@ export class AskOverlayComponent {
     this.options = options;
     this.theme = theme;
     this.done = done;
-    const longest = Math.max(visibleWidth(title), ...options.map((o) => visibleWidth(o)));
+    // Display strings are sanitized (control characters stripped); `options` stays
+    // authoritative for the value handed back on selection.
+    this.displayTitle = sanitize(title);
+    this.displayOptions = options.map(sanitize);
+    const longest = Math.max(visibleWidth(this.displayTitle), ...this.displayOptions.map((o) => visibleWidth(o)));
     this.width = Math.min(100, longest + 8);
   }
 
@@ -163,10 +179,10 @@ export class AskOverlayComponent {
 
     const lines: string[] = [];
     lines.push(th.fg("border", `${BOX.tl}${BOX.h.repeat(innerW)}${BOX.tr}`));
-    lines.push(row(` ${th.fg("accent", this.title)}`));
+    lines.push(row(` ${th.fg("accent", this.displayTitle)}`));
     lines.push(row(""));
 
-    this.options.forEach((option, i) => {
+    this.displayOptions.forEach((option, i) => {
       const selected = i === this.selected;
       const prefix = selected ? " ▶ " : "   ";
       const marker = th.fg("dim", `${i + 1}.`);
