@@ -133,11 +133,10 @@ interface AskReview {
   isOutside?: boolean;
   /** True when approving would run bash UNSANDBOXED — never auto-approved. */
   /**
-   * Recorded on every prompt that would run the command OUTSIDE the sandbox
-   * (an escape/privilege ask, or any ask in a mode whose sandbox is off).
-   * Informational: in a classifier mode the reviewer decides these asks too
-   * (see README, "AI auto 模式") — approving one marks the call for unsandboxed
-   * execution, so the classifier can grant an unsandboxed run.
+   * Set on every prompt that would run the command OUTSIDE the sandbox (an
+   * escape/privilege ask, or any ask in a mode whose sandbox is off). Such an
+   * ask is never handed to the classifier — approving it is the strongest grant
+   * in the system — so this forces the human prompt (a headless session denies).
    */
   escalateToHuman?: boolean;
 }
@@ -384,6 +383,12 @@ export default async function (pi: ExtensionAPI) {
       );
     const cfg = normalizeClassifierConfig(config.classifier);
     if (!cfg.enabled) return humanPrompt();
+    // An escape (out-of-project path or privilege escalation) — and any ask that
+    // would run the command OUTSIDE the sandbox — is never approved by the
+    // classifier: that is the strongest grant in the system, and the reviewer
+    // reads model-authored text. It always goes to the human; with no UI
+    // (headless) askWithSession denies it outright.
+    if (review.escalateToHuman) return humanPrompt();
     const targets = Array.isArray(target) ? target : [target];
     const subject: ClassifierSubject = {
       mode: modeName,

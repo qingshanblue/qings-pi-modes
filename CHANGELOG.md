@@ -69,6 +69,16 @@ Every section below `2.4.1` is the upstream history this fork starts from
   per-token colors derived from risk. `"statusFormat": "verbose"` restores the
   spelled-out form. Switching a mode / sandbox / network no longer prints a
   notice — the footer is the single source of truth.
+- **An escape is never auto-approved.** A pending action that would run the
+  command *outside* the sandbox (an out-of-project path or a privilege
+  escalation, or any ask in a mode whose sandbox is off) bypasses the
+  classifier entirely and always reaches the human prompt — in a headless
+  session it is denied. The reviewer can only decide asks that stay
+  sandboxed.
+- **The Tier-1 read-only whitelist is deliberately strict**: any argument
+  that can write or execute (`find -execdir/-okdir/-fprint*`, `sort -o`,
+  `uniq in out`, `git … --output=`) disqualifies a command, and `sed` is
+  absent from the list (its `e` command executes shell commands).
 - **`classifier.failClosed` defaults to `true`**: a classifier error, timeout, or
   unparsable verdict blocks the operation (with a warning notice) rather than
   falling back to a prompt nobody may be present to answer. Set

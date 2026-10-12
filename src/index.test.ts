@@ -1354,6 +1354,23 @@ test("automode: an allowed ask runs without prompting; status shows the classifi
   }
 });
 
+test("automode: an escape is never approved by the classifier — it goes to the human", { skip }, async () => {
+  // The classifier WOULD allow it; the prompt must still reach the human because
+  // approving an escape runs the command outside the sandbox.
+  const registry = classifierRegistry(allowReply);
+  const h = await setup({ permFlag: "auto", modelRegistry: registry, model: { id: "m", provider: "p" } });
+  try {
+    h.ctx.answers.push("Deny");
+    const res = await h.call("bash", { command: "cat /etc/hostname" });
+    assert.equal(res?.block, true);
+    assert.equal(registry.calls.length, 0, "the classifier must not see an escape");
+    assert.equal(h.ctx.prompts.length, 1);
+    assert.match(h.ctx.prompts[0].title, /outside project|unsandboxed/i);
+  } finally {
+    h.cleanup();
+  }
+});
+
 test("automode: a denied ask is blocked without prompting", { skip }, async () => {
   const registry = classifierRegistry(denyReply);
   const h = await setup({ permFlag: "auto", modelRegistry: registry, model: { id: "m", provider: "p" } });

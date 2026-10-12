@@ -47,7 +47,10 @@ you can rely on it appropriately.
   filter rather than containment. The OS sandbox state and the hard-deny paths
   remain the boundaries. `classifier.failClosed` defaults to `true`, so an
   error, timeout, or unparsable verdict blocks the action instead of falling
-  back to a prompt nobody may be present to answer.
+  back to a prompt nobody may be present to answer. An escape — an
+  out-of-project path or privilege escalation, i.e. any ask that would run
+  the command outside the sandbox — is never handed to the classifier at
+  all: it always goes to the human prompt (denied in a headless session).
 
 - **Reads are deny-listed, not allow-listed.** The sandbox blocks out-of-project
   *writes* at the kernel, but reads stay broad (so build tools work) except for

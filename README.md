@@ -227,7 +227,7 @@ Claude Code auto mode 的形态。它是唯一带 `"classifier": true` 的内置
 Tier 0   permission.allow 规则           → 放行
 Tier 1   只读命令白名单（内置）           → 放行（无重定向/命令替换才合格）
 Tier 2   其余 ask                        → 模型审批
-旁路     逃逸（越界路径/提权）            → 模型审批（strict 沙箱态下直接 block）
+旁路     逃逸（越界路径/提权）            → **始终人工**（LLM 不得授予无沙箱执行；strict 沙箱态下直接 block）
 ```
 
 - 分类器**进程内**运行，走 pi 的模型层（`ctx.modelRegistry`），复用你真实的
@@ -247,6 +247,8 @@ Tier 2   其余 ask                        → 模型审批
   用策略规则再放开（如 `"bash": { "sed -n*": "allow" }`）。
 - **fail-closed 默认**：分类器出错/超时/返回不可解析 → **该操作被拦**。全局配置
   `"classifier": { "failClosed": false }` 可改为降级人工弹窗。
+- **逃逸永不交给分类器**：越界路径/提权，以及任何会以「无沙箱」方式执行的 ask，一律走人工确认
+  （headless 下即拒绝）——最危险的授权不给 LLM。
 - **它是启发式审查，不是安全边界**：审查文本里含模型写的命令与参数，理论上可被诱导；
   不可解析的回复一律按拒绝处理，但仍请把 `classifier: true` 的模式当作便利过滤器——
   真正的边界是沙箱态（`alt+s`）与硬拦规则（详见 SECURITY.md）。
