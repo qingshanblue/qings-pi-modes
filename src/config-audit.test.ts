@@ -95,7 +95,7 @@ test("shipped data: history parses, covers 2.0.0 to 2.2.1, differs from the curr
   // they are not compared; `defaultMode` and `cycleOrder` are the stale leaves.
   assert.deepEqual(
     stale.map((f) => f.path).sort(),
-    ["cycleOrder", "defaultMode", "modes.plan.permission.bash"],
+    ["cycleOrder", "defaultMode", "modes.plan.color", "modes.plan.label", "modes.plan.permission.bash"],
   );
   // And a verbatim copy of the CURRENT defaults is fully silent.
   const freshCopy = JSON.parse(readFileSync(stockDefaultsFile(), "utf-8")) as Record<string, unknown>;

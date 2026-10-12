@@ -74,7 +74,7 @@ export function hasMode(modes: Record<string, unknown>, name: unknown): name is 
 }
 
 const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
-const MODE_COLORS = new Set(["muted", "mdLink", "accent", "error", "warning"]);
+const MODE_COLORS = new Set(["muted", "mdLink", "accent", "error", "warning", "success"]);
 
 const SANDBOX_STATES = new Set(["off", "on", "strict"]);
 const isSandboxState = (v: unknown): v is SandboxState => typeof v === "string" && SANDBOX_STATES.has(v);

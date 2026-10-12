@@ -69,8 +69,10 @@ export const SURFACES: Surface[] = [
 /** Surfaces that resolve against a filesystem path (subject to the `path` gate). */
 export const FILE_SURFACES: Surface[] = ["read", "write", "edit", "grep", "find", "ls", "bash"];
 
-/** Footer label colors (semantic theme tokens, no icons). */
-export type ModeColor = "muted" | "mdLink" | "accent" | "error" | "warning";
+/** Footer label colors (semantic theme tokens, no icons). The shipped modes map
+ *  them to a risk gradient: plan=success(绿，只读最安全) → ask=muted(人工把关) →
+ *  edits=mdLink(自动改文件) → auto=warning(AI 判定) → accept=error(无审批，最高风险). */
+export type ModeColor = "muted" | "mdLink" | "accent" | "error" | "warning" | "success";
 
 /** The runtime sandbox state: `off` (none), `on` (project-writable), `ro` (read-only). */
 /** The runtime sandbox state: `off` (no OS sandbox), `on` (outside write-blocked,
@@ -206,13 +208,13 @@ export const PLAN_PROMPT_SENTINEL = "@plan";
 // users edit. The emergency in-code fallback lives in config-load.ts.
 
 /**
- * System-prompt addition injected while Plan Mode is active (resolved from the
+ * System-prompt addition injected while Plan is active (resolved from the
  * `"@plan"` sentinel). `today` is an ISO date (YYYY-MM-DD) stamped at call time
  * so the suggested plan filename uses the current date.
  */
 export function planModeSystemPrompt(today: string): string {
   return [
-    "## Plan Mode is active",
+    "## Plan is active",
     "",
     "In this mode only Markdown files can be created or edited (with the Write/Edit",
     "tools); bash commands that would change anything are not permitted here, so do",

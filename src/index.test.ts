@@ -507,7 +507,7 @@ test("plan mode: Markdown-only writes, plan prompt injected, show_plan stays vis
   const h = await setup();
   try {
     await h.perm("plan");
-    assert.match(h.ctx.status, /^Plan Mode-/);
+    assert.match(h.ctx.status, /^Plan-/);
 
     // Markdown in-project: silent allow. Code: deny with the friendly reason.
     assert.equal(await h.call("write", { path: "plan/2026-07-11_x.md" }), undefined);
@@ -521,9 +521,9 @@ test("plan mode: Markdown-only writes, plan prompt injected, show_plan stays vis
     // since the harness runs --no-sandbox).
     const res = (await h.pi.emit("before_agent_start", { systemPrompt: "BASE" }, h.ctx)) as { systemPrompt: string };
     assert.match(res.systemPrompt, /^BASE\n\n/);
-    assert.match(res.systemPrompt, /Sandbox & permissions \(Plan Mode\)/);
-    assert.match(res.systemPrompt, /Plan Mode is active/);
-    assert.ok(res.systemPrompt.indexOf("Sandbox & permissions") < res.systemPrompt.indexOf("Plan Mode is active"));
+    assert.match(res.systemPrompt, /Sandbox & permissions \(Plan\)/);
+    assert.match(res.systemPrompt, /Plan is active/);
+    assert.ok(res.systemPrompt.indexOf("Sandbox & permissions") < res.systemPrompt.indexOf("Plan is active"));
 
     // Tool visibility ran and show_plan is present.
     assert.ok(h.pi.activeTools.includes("show_plan"));
@@ -711,7 +711,7 @@ test("headless fallback: restrictive policy WITHOUT the plan prompt, not exporte
     // knowledge helps; a planning prompt would misdirect).
     const res = (await h.pi.emit("before_agent_start", { systemPrompt: "BASE" }, h.ctx)) as { systemPrompt: string };
     assert.match(res.systemPrompt, /Sandbox & permissions/);
-    assert.doesNotMatch(res.systemPrompt, /Plan Mode is active/);
+    assert.doesNotMatch(res.systemPrompt, /Plan is active/);
     // The implicit fallback is not forwarded as if it were an explicit choice:
     // a grandchild derives its own fallback (and skips the prompt too).
     assert.equal(process.env.PI_PERMISSION_MODE, undefined);
@@ -723,9 +723,9 @@ test("headless fallback: restrictive policy WITHOUT the plan prompt, not exporte
 test("headless child with an explicitly forwarded mode keeps its system prompt", { skip }, async () => {
   const h = await setup({ hasUI: false, envMode: "plan" });
   try {
-    assert.match(h.ctx.status, /^Plan Mode-/);
+    assert.match(h.ctx.status, /^Plan-/);
     const res = (await h.pi.emit("before_agent_start", { systemPrompt: "BASE" }, h.ctx)) as { systemPrompt: string };
-    assert.match(res.systemPrompt, /Plan Mode is active/); // explicit → injected
+    assert.match(res.systemPrompt, /Plan is active/); // explicit → injected
     assert.equal(process.env.PI_PERMISSION_MODE, "plan"); // and re-exported onward
   } finally {
     h.cleanup();
@@ -802,7 +802,7 @@ test("defaults audit: stale /perm-init copy warns per field, acknowledge silence
     h.ctx.notices.length = 0;
     await h.pi.emit("session_start", {}, h.ctx);
     const stale = h.ctx.notices.find((n) => /still hold an outdated default/.test(n)) ?? "";
-    assert.match(stale, /3 value\(s\)/); // defaultMode + cycleOrder + plan's bash policy are stale
+    assert.match(stale, /5 value\(s\)/); // defaultMode + cycleOrder + plan's bash policy are stale
     assert.match(stale, /defaultMode still holds the 2\.0\.0 to 2\.3\.1 default/);
     assert.match(stale, /cycleOrder still holds the 2\.0\.0 to 2\.3\.1 default/);
     assert.match(stale, /acknowledgeDefaults/);
@@ -1098,7 +1098,7 @@ test("plan approval A: Accept after the run switches to Edits and sends the appr
     await runWithShownPlan(h, "plan/2026-09-24_x.md");
     assert.deepEqual(h.ctx.prompts.at(-1), {
       title: "Plan ready: plan/2026-09-24_x.md",
-      options: ["Accept: switch to Edits and implement it", "Decline: keep refining in Plan Mode"],
+      options: ["Accept: switch to Edits and implement it", "Decline: keep refining in Plan"],
     });
     assert.match(h.ctx.status, /^Edits-/);
     assert.deepEqual(h.pi.messages, [{ content: APPROVE_MSG("plan/2026-09-24_x.md"), opts: { deliverAs: "followUp" } }]); // queued: agent_end still counts as streaming
@@ -1124,9 +1124,9 @@ test("plan approval: Decline keeps Plan Mode and the pending plan; B confirms on
   const h = await setup();
   try {
     await h.perm("plan");
-    h.ctx.answers.push("Decline: keep refining in Plan Mode");
+    h.ctx.answers.push("Decline: keep refining in Plan");
     await runWithShownPlan(h, "plan/2026-09-24_a.md");
-    assert.match(h.ctx.status, /^Plan Mode-/);
+    assert.match(h.ctx.status, /^Plan-/);
     assert.equal(h.pi.messages.length, 0);
     // A second run without a new show_plan asks nothing.
     const prompts = h.ctx.prompts.length;
@@ -1150,7 +1150,7 @@ test("plan approval: Decline keeps Plan Mode and the pending plan; B confirms on
     // A dismissed prompt (Esc -> undefined) is a decline too.
     await h.perm("plan");
     await runWithShownPlan(h, "plan/2026-09-24_b.md"); // no scripted answer -> undefined
-    assert.match(h.ctx.status, /^Plan Mode-/);
+    assert.match(h.ctx.status, /^Plan-/);
     assert.equal(h.pi.messages.length, 1);
   } finally {
     h.cleanup();
@@ -1197,7 +1197,7 @@ test("plan approval: a missing approveMode warns once and disables A, B, and C; 
     await h.pi.commands.get("plan")!("approve", h.ctx);
     assert.equal(h.pi.messages.length, 0);
     assert.equal(h.ctx.notices.filter((n) => /approveMode "nope"/.test(n)).length, 1, "warned once");
-    assert.match(h.ctx.status, /^Plan Mode-/);
+    assert.match(h.ctx.status, /^Plan-/);
 
     // A custom approve mode + message.
     writeFileSync(
@@ -1282,7 +1282,7 @@ test("plan approval: a plan edited after show_plan is not approved blindly; unsa
     await h.pi.commands.get("plan")!("approve", h.ctx);
     assert.equal(h.pi.messages.length, 0);
     assert.match(h.ctx.notices.at(-1) ?? "", /changed since it was shown/);
-    assert.match(h.ctx.status, /^Plan Mode-/);
+    assert.match(h.ctx.status, /^Plan-/);
     // A name carrying a backtick (message injection) is displayed but not offered.
     await runWithShownPlan(h, "plan/x`y.md");
     assert.equal(h.ctx.prompts.length, 0);

@@ -69,8 +69,8 @@
       }
     },
     "plan": {
-      "label": "Plan Mode",
-      "color": "mdLink",
+      "label": "Plan",
+      "color": "success",
       "systemPrompt": "@plan",
       "permission": {
         "path": {
@@ -125,7 +125,7 @@
     },
     "edits": {
       "label": "Edits",
-      "color": "accent",
+      "color": "mdLink",
       "permission": {
         "path": {
           "*": "allow"
