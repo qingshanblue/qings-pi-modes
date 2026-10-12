@@ -48,7 +48,7 @@
   "modes": {
     "ask": {
       "label": "Ask",
-      "color": "muted",
+      "color": "success",
       "permission": {
         "path": {
           "*": "allow"
@@ -70,7 +70,7 @@
     },
     "plan": {
       "label": "Plan",
-      "color": "success",
+      "color": "muted",
       "systemPrompt": "@plan",
       "permission": {
         "path": {

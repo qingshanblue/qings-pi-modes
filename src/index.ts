@@ -646,10 +646,6 @@ export default async function (pi: ExtensionAPI) {
     description: `Cycle permission mode (${config.cycleOrder.join(" -> ")})`,
     handler: async (ctx) => cycle(ctx),
   });
-  pi.registerShortcut("alt+m", {
-    description: "Cycle permission mode (alias of ctrl+q)",
-    handler: async (ctx) => cycle(ctx),
-  });
   pi.registerCommand("perm", {
     description: `Set or cycle permission mode: /perm [${config.cycleOrder.join("|")}|init|clear-approvals|blocks|unblock <path>]`,
     handler: async (args, ctx) => {
@@ -775,10 +771,6 @@ export default async function (pi: ExtensionAPI) {
 
   pi.registerShortcut("ctrl+n", {
     description: "Toggle network filtering for this session (filtered <-> open)",
-    handler: toggleNetwork,
-  });
-  pi.registerShortcut("alt+n", {
-    description: "Toggle network filtering (alias of ctrl+n)",
     handler: toggleNetwork,
   });
 
@@ -930,12 +922,8 @@ export default async function (pi: ExtensionAPI) {
       );
     },
   });
-  pi.registerShortcut("ctrl+s", {
+  pi.registerShortcut("ctrl+g", {
     description: "Cycle sandbox state (off → on → strict)",
-    handler: cycleSandbox,
-  });
-  pi.registerShortcut("alt+s", {
-    description: "Cycle sandbox state (alias of ctrl+s)",
     handler: cycleSandbox,
   });
 
