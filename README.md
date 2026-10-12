@@ -11,7 +11,7 @@
 | 轴 | 快捷键 | 内容 |
 |---|---|---|
 | **审批模式** | `ctrl+q` | 谁来批准 `ask`：人工 / AI 分类器 / 自动接受 |
-| **沙箱边界** | `ctrl+g` | OS 级沙箱的**三态**：只管「工作目录之外的读写」|
+| **沙箱边界** | `ctrl+m` | OS 级沙箱的**三态**：只管「工作目录之外的读写」|
 | **网络** | `ctrl+n` | 域名过滤：`filtered ⇄ open`（独立于沙箱与模式）|
 
 三条轴**完全正交**：切模式不重启沙箱、切沙箱不改审批、切网络不影响其它——footer 状态条是唯一事实来源。
@@ -70,7 +70,7 @@ sudo apt install -y bubblewrap socat ripgrep
 ### 验证
 
 1. 在任意项目启动 pi —— footer 显示模式指示，如 `Ask`；
-2. 切到 Edits（`ctrl+q` 直到 `Edits`，或 `/perm edits`）：
+2. 切到 Edits（`ctrl+q` 直到 `Edits`，或 `/permission edits`）：
    - 沙箱可用 → `Edits · sandbox:on …`；
    - 否则 → `Edits · sandbox:unavailable` + 修复提示；
 3. `/sandbox` 打印当前沙箱配置（或不可用的原因）。
@@ -81,7 +81,7 @@ sudo apt install -y bubblewrap socat ripgrep
 
 ### ① 模式（审批自动化级别）
 
-`ctrl+q` 循环（按权限从低到高），`/perm <mode>` 直达。当前模式随会话持久化
+`ctrl+q` 循环（按权限从低到高），`/permission <mode>` 直达，`/permission` 弹出选择器。当前模式随会话持久化
 （`/reload`、resume、分支导航都保留），显示在 footer。
 
 | 模式 | 行为 |
@@ -90,14 +90,14 @@ sudo apt install -y bubblewrap socat ripgrep
 | **ask** `●` | 每个变更类操作都问你：`bash`/`edit`/`write`/web 搜索/扩展工具。读免费；白名单内的只读 bash 免问。批准的项目内 `bash` 在**沙箱内**运行。 |
 | **edits** `✎` | 项目内 `edit`/`write` **不再确认**（= Claude Code 的 accept-edits）；`bash` 仍逐条询问。项目内 `bash` 在**沙箱内**运行。 |
 | **auto** `▶` | 读免费；`bash`/`edit`/`write`、越界访问、web 搜索、扩展工具交给 **AI 安全分类器**判定而非逐条问你（见 [AI auto 模式](#ai-auto-模式)）。在**沙箱内**运行。 |
-| **accept** `⚡` | **从不询问**（自动接受所有策略决定）——但仍**受沙箱边界约束**：`ctrl+g` 决定它能触达什么。无保护路径兜底。 |
+| **accept** `⚡` | **从不询问**（自动接受所有策略决定）——但仍**受沙箱边界约束**：`ctrl+m` 决定它能触达什么。无保护路径兜底。 |
 
 - 循环顺序 = 权限从低到高：`plan → ask → edits → auto → accept`。
 - 模式是**数据**：可在 `permission-mode.json` 里调整或新增（见[配置](#配置)）。
 
 ### ② 沙箱边界（三态，只管「工作目录外」）
 
-沙箱只有一个职责：**项目边界**。`ctrl+g` 循环三档（`/sandbox off|on|strict` 直达，`/sandbox` 看详情）：
+沙箱只有一个职责：**项目边界**。`ctrl+m` 循环三档（`/sandbox off|on|strict` 直达，`/sandbox status` 看详情）：
 
 | 档 | 外路径读 | 外路径写 | 项目内 | 越界处理 |
 |---|---|---|---|---|
@@ -112,7 +112,7 @@ sudo apt install -y bubblewrap socat ripgrep
   文件工具不会把它们当越界（沙箱 `off` = 一切照旧，只是没有 OS 约束）。
 - 会话状态持久化（`/reload`、resume、分支导航都保留），并转发给子 agent
   （`PI_PERMISSION_SANDBOX`）；headless 子进程无转发值时默认 `on`。
-- 模式可用 `sandboxPin` 钉住某档（覆盖 `ctrl+g`，离开该模式恢复会话状态）；
+- 模式可用 `sandboxPin` 钉住某档（覆盖 `ctrl+m`，离开该模式恢复会话状态）；
   内置模式都不使用它，保留给自定义模式。
 
 ### ③ 网络（独立轴）
@@ -146,7 +146,7 @@ Plan ready: plan/2026-09-24_feature.md
 
 两条兜底路径覆盖其它入口：
 
-- 计划 pending 期间手动切进批准模式（`ctrl+q`、`/perm edits`）会问
+- 计划 pending 期间手动切进批准模式（`ctrl+q`、`/permission edits`）会问
   `Implement plan/... now?`；No 留在 Edits，什么都不发。
 - **`/plan approve`** 直接切换并发送，不再询问；**`/plan status`** 显示 pending 的计划。
 
@@ -189,7 +189,7 @@ touch，长会话不会被并发会话清扫掉。base 下的文件与符号链�
 （*Allow for session / Allow forever / Deny*），然后放行或失败：
 
 - **`ctrl+n`** 切换本会话的过滤：footer 上 `net:limit`（黄）⇄ `net:free`（绿）；
-- **`/net`** —— `status`（allowlist、会话授权/拒绝）、`allow <domain…>`（会话级授权）、
+- **`/network`** —— `status`（allowlist、会话授权/拒绝）、`allow <domain…>`（会话级授权）、
   `open` / `restrict`（同 `ctrl+n`）、`reset`（清空会话授权/拒绝）；
 - 模型有 **`request_network_access`** 工具：它列出域名与理由，你批准或拒绝——
   一次可覆盖多个域名（比如一次安装需要的所有主机）。被拒的主机本会话保持拒绝
@@ -275,18 +275,18 @@ Tier 2   其余 ask                        → 模型审批
 | 快捷键 | 作用 |
 |---|---|
 | `ctrl+q` | 循环审批模式：`plan → ask → edits → auto → accept` |
-| `ctrl+g` | 循环沙箱态：`off → on → strict` |
+| `ctrl+m` | 循环沙箱态：`off → on → strict` |
 | `ctrl+n` | 切换网络过滤：`filtered ⇄ open` |
 
 ## 命令
 
 | 命令 | 作用 |
 |---|---|
-| `/perm [mode]` | 切换/循环模式；`/perm init` 生成全局配置副本；`clear-approvals`、`blocks`、`unblock <path>` |
+| `/permission [mode]` | 设置模式（无参数：交互式选择器）；`/permission init` 生成全局配置副本；`clear-approvals`、`blocks`、`unblock <path>` |
 | `/classifier-model [current \| <provider/model>]` | 查看/切换 auto 审批模型（持久化）|
 | `/plan approve` · `/plan status` | 批准并实施 pending 的计划 / 查看 |
-| `/net status` · `allow <domain…>` · `open/restrict` · `reset` | 网络会话状态与授权 |
-| `/sandbox [off\|on\|strict]` | 查看/设置沙箱边界档 |
+| `/network status` · `allow <domain…>` · `open/restrict` · `reset` | 网络过滤（无参数：交互式选择 limit/free）；会话状态与授权 |
+| `/sandbox [off\|on\|strict\|status]` | 设置沙箱边界档（无参数：交互式选择器）；`status` 看详情 |
 
 启动旗标：`--perm <mode>`（指定初始模式）、`--no-sandbox`（禁用 OS 沙箱，
 降级为 AST/启发式门控 + 弹窗）。
@@ -360,7 +360,7 @@ Tier 2   其余 ask                        → 模型审批
 模式是数据，按此顺序叠加：
 
 1. **出厂默认** —— `permission-mode.defaults.json`，随扩展发布（五个内置模式）。
-   与你编辑的格式相同；复制一份即可自定义，或用 **`/perm init`** 在下面的全局
+   与你编辑的格式相同；复制一份即可自定义，或用 **`/permission init`** 在下面的全局
    路径生成一份副本。
 2. `~/.pi/agent/permission-mode/permission-mode.json`（**全局，完全权威**）：
    重定义内置模式、新增模式、设置 `defaultMode` / `cycleOrder` / `sandbox` /
@@ -397,7 +397,7 @@ Tier 2   其余 ask                        → 模型审批
     "failClosed": true                 // 出错/超时 → 拦截（false = 降级为人工弹窗）
   },
   "modes": {
-    "ask": {                           // 这里是示意 —— /perm init 可拿到真实默认值
+    "ask": {                           // 这里是示意 —— /permission init 可拿到真实默认值
       "label": "Ask",
       "color": "muted",                // muted | mdLink | accent | error | warning
       "systemPrompt": "@plan",         // 可选；"@plan" = 带日期的 Plan 模式提示
@@ -427,7 +427,7 @@ Tier 2   其余 ask                        → 模型审批
 
 ### 保持全局配置不过期
 
-`/perm init` 会写入一份**完整**的出厂默认副本供你就地修改。副本里的每个值都会
+`/permission init` 会写入一份**完整**的出厂默认副本供你就地修改。副本里的每个值都会
 覆盖出厂默认，这意味着之后默认值的变更（例如 2.3.0 把 `allowWrite` 从 `/tmp`
 收紧到 `/tmp/pi`）不会到达仍带旧值的副本。两个机制兜底：
 
@@ -441,7 +441,7 @@ Tier 2   其余 ask                        → 模型审批
   提醒去比对。最后见过的版本记录在 `~/.pi/agent/permission-mode/state.json`。
 
 想保留过期值，设 `"acknowledgeDefaults": "<版本>"`（你比对时所针对的版本；
-`/perm init` 会在 `$comment` 里记录副本来源）。在出厂默认再次变化前告警静默。
+`/permission init` 会在 `$comment` 里记录副本来源）。在出厂默认再次变化前告警静默。
 更简单的做法是删掉你无意修改的值：文件是 overlay，省略的项跟随默认。
 
 ### 自定义模式

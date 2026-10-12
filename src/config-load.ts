@@ -41,7 +41,7 @@ import {
 type OnError = (message: string) => void;
 const noop: OnError = () => {};
 
-/** `$schema` URL written into files this extension creates (/perm init, "Allow forever"). */
+/** `$schema` URL written into files this extension creates (/permission init, "Allow forever"). */
 export const SCHEMA_URL = "https://raw.githubusercontent.com/qingshanblue/qings-pi-modes/main/schemas/permission-mode.schema.json";
 
 /** A project config larger than this is ignored (a FIFO or a giant file must not stall the loader). */
@@ -624,7 +624,7 @@ function parseConfigFile(p: string, onError: OnError): Partial<PermissionModeCon
       return undefined;
     }
     delete data.$schema;
-    delete data.$comment; // `/perm init` provenance note
+    delete data.$comment; // `/permission init` provenance note
     return data as Partial<PermissionModeConfig>;
   } catch (e) {
     onError(`permission-mode: could not parse ${p}: ${e}`);
@@ -652,7 +652,7 @@ export function loadStockDefaults(onError: OnError = noop): PermissionModeConfig
   return mergeGlobal(clone(FALLBACK_CONFIG), stock, onError);
 }
 
-/** Path to the user's global config (the one `/perm init` and persistence write). */
+/** Path to the user's global config (the one `/permission init` and persistence write). */
 export function globalConfigFile(agentDir: string): string {
   return path.join(agentDir, "permission-mode", "permission-mode.json");
 }

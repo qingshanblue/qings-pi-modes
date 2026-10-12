@@ -28,9 +28,9 @@ export interface AwarenessOptions {
   active: boolean;
   /** Why it isn't, when a sandboxed mode runs degraded (warn text / --no-sandbox). */
   reason?: string;
-  /** `/net open` / alt+n: domain filtering suspended for this session. */
+  /** `/network open` / ctrl+n: domain filtering suspended for this session. */
   networkOpen?: boolean;
-  /** Session-granted domains (via prompts, /net allow, request_network_access). */
+  /** Session-granted domains (via prompts, /network allow, request_network_access). */
   sessionDomains?: string[];
   /** This session's scratch directory (scratch.ts); TMPDIR points there inside bash. */
   scratchDir?: string;

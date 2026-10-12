@@ -2,7 +2,7 @@
  * Config audit - keeps a user's global permission-mode.json from silently
  * falling behind the shipped defaults.
  *
- * `/perm init` copies the full stock defaults so users can edit values in
+ * `/permission init` copies the full stock defaults so users can edit values in
  * place, which is convenient but pins them to the defaults of whatever
  * version they ran it on: a later tightening (2.3.0 narrowed `allowWrite`
  * from /tmp to /tmp/pi) never reaches a global file that still says /tmp,
