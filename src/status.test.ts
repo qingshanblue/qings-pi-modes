@@ -31,42 +31,42 @@ test("updateStatus (verbose): filtered / open / unrestricted / degraded", () => 
   assert.equal(c.status, "Build (ctrl+q) (!) sandbox init failed  Network: open");
 });
 
-test("updateStatus (compact, default): readable tokens for sandbox / network / classifier", () => {
+test("updateStatus (compact, default): box / net / AI tokens", () => {
   const ready = { ready: true, warn: undefined, disabled: false };
-  const sbOnFiltered = { enabled: true, writable: true, network: { allowedDomains: ["a.com"] } };
-  // sandbox on + filtered network + classifier
+  const sbOnLimited = { enabled: true, writable: true, network: { allowedDomains: ["a.com"] } };
+  // sandbox on + network limited + classifier
   let c = ctx();
-  updateStatus(c as never, { ...mode(sbOnFiltered), classifier: true }, ready, false, "AI:current-model", true, "on");
-  assert.equal(c.status, "Build · sandbox:on · filter:on · AI:current-model");
-  // network open
+  updateStatus(c as never, { ...mode(sbOnLimited), classifier: true }, ready, false, "AI:inherit", true, "on");
+  assert.equal(c.status, "Build-box:on-net:limit-AI:inherit");
+  // network free
   c = ctx();
-  updateStatus(c as never, mode(sbOnFiltered), ready, true, undefined, true, "on");
-  assert.equal(c.status, "Build · sandbox:on · filter:off");
-  // read-only sandbox
+  updateStatus(c as never, mode(sbOnLimited), ready, true, undefined, true, "on");
+  assert.equal(c.status, "Build-box:on-net:free");
+  // strict sandbox
   c = ctx();
-  updateStatus(c as never, mode({ enabled: true, writable: true, network: { allowedDomains: ["a.com"] } }), ready, false, undefined, true, "strict");
-  assert.equal(c.status, "Build · sandbox:strict · filter:on");
+  updateStatus(c as never, mode(sbOnLimited), ready, false, undefined, true, "strict");
+  assert.equal(c.status, "Build-box:strict-net:limit");
   // no allowlist → no network token
   c = ctx();
   updateStatus(c as never, mode({ enabled: true, writable: true }), ready, false, undefined, true, "on");
-  assert.equal(c.status, "Build · sandbox:on");
+  assert.equal(c.status, "Build-box:on");
   // sandbox off
   c = ctx();
   updateStatus(c as never, mode({ enabled: false, writable: true }), ready, false, undefined, true, "off");
-  assert.equal(c.status, "Build · sandbox:off");
+  assert.equal(c.status, "Build-box:off");
   // sandbox unavailable (degraded)
   c = ctx();
-  updateStatus(c as never, mode(sbOnFiltered), { ready: false, warn: "nope", disabled: false }, false, undefined, true, "on");
-  assert.equal(c.status, "Build · sandbox:unavailable");
+  updateStatus(c as never, mode(sbOnLimited), { ready: false, warn: "nope", disabled: false }, false, undefined, true, "on");
+  assert.equal(c.status, "Build-box:unavailable");
 });
 
 test("updateStatus: the classifier AI token only appears in classifier modes", () => {
   const ready = { ready: true, warn: undefined, disabled: false };
   const sb = { enabled: true, writable: true };
   let c = ctx();
-  updateStatus(c as never, { ...mode(sb), classifier: true }, ready, false, "AI:m", true, "on");
-  assert.match(c.status, /AI:m/);
+  updateStatus(c as never, { ...mode(sb), classifier: true }, ready, false, "AI:inherit", true, "on");
+  assert.match(c.status, /AI:inherit/);
   c = ctx();
-  updateStatus(c as never, mode(sb), ready, false, "AI:m", true, "on");
+  updateStatus(c as never, mode(sb), ready, false, "AI:inherit", true, "on");
   assert.ok(!/AI/.test(c.status), "no AI token outside classifier modes");
 });

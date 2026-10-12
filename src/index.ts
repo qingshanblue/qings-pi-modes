@@ -240,7 +240,7 @@ export default async function (pi: ExtensionAPI) {
     if (!m.classifier) return undefined;
     const cfg = normalizeClassifierConfig(config.classifier);
     if (!cfg.enabled) return "AI:off";
-    return `AI:${cfg.model === "current" ? "current-model" : cfg.model}`;
+    return `AI:${cfg.model === "current" ? "inherit" : cfg.model}`;
   };
 
   /** Render the `perm` status chip, appending the classifier chip in AI modes. */

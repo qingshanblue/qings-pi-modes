@@ -267,7 +267,7 @@ test("default mode: reads free, writes prompt, protected paths hard-block", { sk
   const h = await setup();
   try {
     // Footer: mode label + shortcut hints + network state (open here: --no-sandbox).
-    assert.match(h.ctx.status, /^Ask · sandbox:unavailable$/);
+    assert.match(h.ctx.status, /^Ask-box:unavailable$/);
 
     // Reads pass silently.
     assert.equal(await h.call("read", { path: "src/app.ts" }), undefined);
@@ -507,7 +507,7 @@ test("plan mode: Markdown-only writes, plan prompt injected, show_plan stays vis
   const h = await setup();
   try {
     await h.perm("plan");
-    assert.match(h.ctx.status, /^Plan Mode /);
+    assert.match(h.ctx.status, /^Plan Mode-/);
 
     // Markdown in-project: silent allow. Code: deny with the friendly reason.
     assert.equal(await h.call("write", { path: "plan/2026-07-11_x.md" }), undefined);
@@ -580,7 +580,7 @@ test("accept: never prompts, protected paths bypassed", { skip }, async () => {
   const h = await setup();
   try {
     await h.perm("accept");
-    assert.match(h.ctx.status, /^Accept /);
+    assert.match(h.ctx.status, /^Accept-/);
     // The sandbox is decoupled: turn it off so the escape runs without a prompt.
     await h.pi.commands.get("sandbox")!("off", h.ctx);
     assert.equal(await h.call("bash", { command: "sudo rm -rf /" }), undefined);
@@ -703,7 +703,7 @@ test("headless fallback: restrictive policy WITHOUT the plan prompt, not exporte
   const h = await setup({ hasUI: false });
   try {
     // Ask: the headless fallback is the default (ask) mode …
-    assert.match(h.ctx.status, /^Ask /);
+    assert.match(h.ctx.status, /^Ask-/);
     const denied = await h.call("write", { path: "src/app.ts" });
     assert.equal(denied?.block, true); // … and its policy fully applies
     // … but the planning system prompt is NOT injected into the headless
@@ -723,7 +723,7 @@ test("headless fallback: restrictive policy WITHOUT the plan prompt, not exporte
 test("headless child with an explicitly forwarded mode keeps its system prompt", { skip }, async () => {
   const h = await setup({ hasUI: false, envMode: "plan" });
   try {
-    assert.match(h.ctx.status, /^Plan Mode /);
+    assert.match(h.ctx.status, /^Plan Mode-/);
     const res = (await h.pi.emit("before_agent_start", { systemPrompt: "BASE" }, h.ctx)) as { systemPrompt: string };
     assert.match(res.systemPrompt, /Plan Mode is active/); // explicit → injected
     assert.equal(process.env.PI_PERMISSION_MODE, "plan"); // and re-exported onward
@@ -735,7 +735,7 @@ test("headless child with an explicitly forwarded mode keeps its system prompt",
 test("startup: an explicit --perm flag beats a persisted session entry", { skip }, async () => {
   const h = await setup({ permFlag: "accept", entries: [{ type: "custom", customType: "perm-mode", data: { mode: "plan" } }] });
   try {
-    assert.match(h.ctx.status, /^Accept /);
+    assert.match(h.ctx.status, /^Accept-/);
   } finally {
     h.cleanup();
   }
@@ -744,14 +744,14 @@ test("startup: an explicit --perm flag beats a persisted session entry", { skip 
 test("startup: --perm flag wins; a persisted session entry restores the mode", { skip }, async () => {
   const flagged = await setup({ permFlag: "accept" });
   try {
-    assert.match(flagged.ctx.status, /^Accept /);
+    assert.match(flagged.ctx.status, /^Accept-/);
   } finally {
     flagged.cleanup();
   }
 
   const resumed = await setup({ entries: [{ type: "custom", customType: "perm-mode", data: { mode: "edits" } }] });
   try {
-    assert.match(resumed.ctx.status, /^Edits /);
+    assert.match(resumed.ctx.status, /^Edits-/);
   } finally {
     resumed.cleanup();
   }
@@ -760,12 +760,12 @@ test("startup: --perm flag wins; a persisted session entry restores the mode", {
 test("/perm: a bare call cycles, an unknown argument prints usage without switching", { skip }, async () => {
   const h = await setup();
   try {
-    assert.match(h.ctx.status, /^Ask /);
+    assert.match(h.ctx.status, /^Ask-/);
     await h.perm("buidl");
-    assert.match(h.ctx.status, /^Ask /);
+    assert.match(h.ctx.status, /^Ask-/);
     assert.match(h.ctx.notices.at(-1) ?? "", /unknown mode or subcommand "buidl"; usage: \/perm \[plan\|ask\|edits\|auto\|accept\|init/);
     await h.perm("");
-    assert.match(h.ctx.status, /^Edits /); // ask → edits (cycleOrder)
+    assert.match(h.ctx.status, /^Edits-/); // ask → edits (cycleOrder)
   } finally {
     h.cleanup();
   }
@@ -776,12 +776,12 @@ test("ctrl+q cycles modes and persists the choice as a session entry", { skip },
   try {
     // ask → edits → auto → accept (permission order)
     await h.pi.shortcuts.get("ctrl+q")!(h.ctx);
-    assert.match(h.ctx.status, /^Edits /);
+    assert.match(h.ctx.status, /^Edits-/);
     assert.deepEqual(h.pi.entries.at(-1), { customType: "perm-mode", data: { mode: "edits" } });
     await h.pi.shortcuts.get("ctrl+q")!(h.ctx);
-    assert.match(h.ctx.status, /^Auto /);
+    assert.match(h.ctx.status, /^Auto-/);
     await h.pi.shortcuts.get("ctrl+q")!(h.ctx);
-    assert.match(h.ctx.status, /^Accept /);
+    assert.match(h.ctx.status, /^Accept-/);
   } finally {
     h.cleanup();
   }
@@ -887,7 +887,7 @@ test("a hostile project config cannot take the session down: global layer applie
     writeFileSync(path.join(piDir, "permission-mode.json"), '{"modes":{"ask":null,"__proto__":{"sandbox":{"allowWrite":5}}}}');
     h.ctx.notices.length = 0;
     await h.pi.emit("session_start", {}, h.ctx);
-    assert.match(h.ctx.status, /^Ask /); // session start completed (setMode ran)
+    assert.match(h.ctx.status, /^Ask-/); // session start completed (setMode ran)
     assert.ok(h.ctx.notices.some((n) => /project mode "ask" must be an object/.test(n)));
     const denied = await h.call("read", { path: "key.pem" });
     assert.equal(denied?.block, true, "the global layer is still in force");
@@ -899,11 +899,11 @@ test("a hostile project config cannot take the session down: global layer applie
 test("prototype names are not modes anywhere: /perm, env, session entries, headless fallback", { skip }, async () => {
   const h = await setup({ envMode: "constructor" });
   try {
-    assert.match(h.ctx.status, /^Ask /); // env value ignored
+    assert.match(h.ctx.status, /^Ask-/); // env value ignored
     h.ctx.notices.length = 0;
     await h.perm("constructor"); // unknown -> usage notice, no switch, no throw
     assert.match(h.ctx.notices.at(-1) ?? "", /unknown mode or subcommand "constructor"/);
-    assert.match(h.ctx.status, /^Ask /);
+    assert.match(h.ctx.status, /^Ask-/);
   } finally {
     h.cleanup();
   }
@@ -914,7 +914,7 @@ test("prototype names are not modes anywhere: /perm, env, session entries, headl
     mkdirSync(dir, { recursive: true });
     writeFileSync(path.join(dir, "permission-mode.json"), JSON.stringify({ defaultMode: "accept", cycleOrder: ["accept"] }));
     await g.pi.emit("session_start", {}, g.ctx);
-    assert.match(g.ctx.status, /^Accept /);
+    assert.match(g.ctx.status, /^Accept-/);
   } finally {
     g.cleanup();
   }
@@ -1100,7 +1100,7 @@ test("plan approval A: Accept after the run switches to Edits and sends the appr
       title: "Plan ready: plan/2026-09-24_x.md",
       options: ["Accept: switch to Edits and implement it", "Decline: keep refining in Plan Mode"],
     });
-    assert.match(h.ctx.status, /^Edits /);
+    assert.match(h.ctx.status, /^Edits-/);
     assert.deepEqual(h.pi.messages, [{ content: APPROVE_MSG("plan/2026-09-24_x.md"), opts: { deliverAs: "followUp" } }]); // queued: agent_end still counts as streaming
     // Persisted: shown, then approved (no path), so a resume does not re-offer it.
     const plan = h.pi.entries.filter((e) => e.customType === "perm-plan").map((e) => e.data as { path?: string; sha?: string });
@@ -1126,7 +1126,7 @@ test("plan approval: Decline keeps Plan Mode and the pending plan; B confirms on
     await h.perm("plan");
     h.ctx.answers.push("Decline: keep refining in Plan Mode");
     await runWithShownPlan(h, "plan/2026-09-24_a.md");
-    assert.match(h.ctx.status, /^Plan Mode /);
+    assert.match(h.ctx.status, /^Plan Mode-/);
     assert.equal(h.pi.messages.length, 0);
     // A second run without a new show_plan asks nothing.
     const prompts = h.ctx.prompts.length;
@@ -1140,7 +1140,7 @@ test("plan approval: Decline keeps Plan Mode and the pending plan; B confirms on
     h.ctx.confirms.push(false);
     await h.perm("edits");
     assert.deepEqual(h.ctx.confirmPrompts, ["Implement plan/2026-09-24_a.md now?"]);
-    assert.match(h.ctx.status, /^Edits /);
+    assert.match(h.ctx.status, /^Edits-/);
     assert.equal(h.pi.messages.length, 0);
     // Back to Plan, switch again, Yes sends it.
     await h.perm("plan");
@@ -1150,7 +1150,7 @@ test("plan approval: Decline keeps Plan Mode and the pending plan; B confirms on
     // A dismissed prompt (Esc -> undefined) is a decline too.
     await h.perm("plan");
     await runWithShownPlan(h, "plan/2026-09-24_b.md"); // no scripted answer -> undefined
-    assert.match(h.ctx.status, /^Plan Mode /);
+    assert.match(h.ctx.status, /^Plan Mode-/);
     assert.equal(h.pi.messages.length, 1);
   } finally {
     h.cleanup();
@@ -1169,7 +1169,7 @@ test("plan approval C: /plan approve switches and sends without a prompt; nothin
     await h.pi.commands.get("plan")!("approve", h.ctx);
     assert.equal(h.ctx.prompts.length, prompts, "explicit approval asks nothing");
     assert.equal(h.ctx.confirmPrompts.length, 0, "the switch it performs does not ask B");
-    assert.match(h.ctx.status, /^Edits /);
+    assert.match(h.ctx.status, /^Edits-/);
     assert.deepEqual(h.pi.messages.map((m) => m.content), [APPROVE_MSG("plan/2026-09-24_c.md")]);
     // show_plan outside a planning mode (here Edits) is plain display: nothing is offered.
     const before = h.ctx.prompts.length;
@@ -1197,7 +1197,7 @@ test("plan approval: a missing approveMode warns once and disables A, B, and C; 
     await h.pi.commands.get("plan")!("approve", h.ctx);
     assert.equal(h.pi.messages.length, 0);
     assert.equal(h.ctx.notices.filter((n) => /approveMode "nope"/.test(n)).length, 1, "warned once");
-    assert.match(h.ctx.status, /^Plan Mode /);
+    assert.match(h.ctx.status, /^Plan Mode-/);
 
     // A custom approve mode + message.
     writeFileSync(
@@ -1208,7 +1208,7 @@ test("plan approval: a missing approveMode warns once and disables A, B, and C; 
     await h.perm("plan");
     h.ctx.answers.push("Accept: switch to Ask and implement it");
     await runWithShownPlan(h, "plan/2026-09-24_f.md");
-    assert.match(h.ctx.status, /^Ask /);
+    assert.match(h.ctx.status, /^Ask-/);
     assert.deepEqual(h.pi.messages.map((m) => m.content), ["Go: plan/2026-09-24_f.md (plan/2026-09-24_f.md)"]);
   } finally {
     h.cleanup();
@@ -1282,7 +1282,7 @@ test("plan approval: a plan edited after show_plan is not approved blindly; unsa
     await h.pi.commands.get("plan")!("approve", h.ctx);
     assert.equal(h.pi.messages.length, 0);
     assert.match(h.ctx.notices.at(-1) ?? "", /changed since it was shown/);
-    assert.match(h.ctx.status, /^Plan Mode /);
+    assert.match(h.ctx.status, /^Plan Mode-/);
     // A name carrying a backtick (message injection) is displayed but not offered.
     await runWithShownPlan(h, "plan/x`y.md");
     assert.equal(h.ctx.prompts.length, 0);
@@ -1331,8 +1331,8 @@ const denyReply = () => ({ content: [{ type: "text", text: '{"allow":false,"risk
 test("automode: an allowed ask runs without prompting; status shows the classifier", { skip }, async () => {  const registry = classifierRegistry(allowReply);
   const h = await setup({ permFlag: "auto", modelRegistry: registry, model: { id: "m", provider: "p" } });
   try {
-    assert.match(h.ctx.status, /^Auto /);
-    assert.match(h.ctx.status, /AI:current-model/);
+    assert.match(h.ctx.status, /^Auto-/);
+    assert.match(h.ctx.status, /AI:inherit/);
     const res = await h.call("write", { path: "src/app.ts", content: "x" });
     assert.equal(res, undefined); // allowed, not blocked
     assert.equal(h.ctx.prompts.length, 0); // never asked the human

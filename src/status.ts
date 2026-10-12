@@ -1,15 +1,16 @@
 /**
  * Footer status indicator rendering for the current permission mode.
  *
- * Two formats: **compact** (default) is a short, readable token line
- * `Auto · sandbox:on · net:filtered · AI:current-model`; **verbose** keeps the
- * fully-spelled-out form. The mode label is always shown, colored by the mode.
+ * Two formats: **compact** (default) is a short token line
+ * `Auto-box:on-net:limit-AI:inherit`; **verbose** keeps the fully-spelled-out
+ * form. The mode label is always shown, colored by the mode.
  *
- * Tokens (compact):
+ * Tokens (compact), `-`-separated:
  *   mode                 the mode label (colored)
- *   sandbox:on | strict | off | unavailable   (color-coded per state)
- *   net:filtered | open  (only while the sandbox is enforcing a network allowlist)
- *   AI:<model>           (only in classifier modes)
+ *   box:on | strict | off | unavailable   (color-coded per state)
+ *   net:limit | free     (the domain-allowlist toggle — ctrl+n; only while the
+ *                         sandbox is enforcing; the NETWORK itself is never off)
+ *   AI:inherit | AI:<model>   (only in classifier modes)
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -41,10 +42,10 @@ export function updateStatus(
     const state = sandboxState ?? (sb.enabled ? "on" : "off");
     const sbx = !sb.enabled ? "off" : !enforcing ? "unavailable" : state;
     const sbColor = !sb.enabled ? "error" : !enforcing ? "warning" : state === "strict" ? "accent" : "success";
-    const sep = t.fg("dim", " · ");
+    const sep = t.fg("dim", "-");
     let status = t.fg(mode.color, mode.label);
-    status += sep + t.fg(sbColor, `sandbox:${sbx}`);
-    if (netEnabled) status += sep + (networkOpen ? t.fg("warning", "filter:off") : t.fg("success", "filter:on"));
+    status += sep + t.fg(sbColor, `box:${sbx}`);
+    if (netEnabled) status += sep + (networkOpen ? t.fg("warning", "net:free") : t.fg("success", "net:limit"));
     if (mode.classifier && classifierLabel) status += sep + t.fg(mode.color, classifierLabel);
     ctx.ui.setStatus("perm", status);
     return;
