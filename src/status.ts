@@ -44,7 +44,7 @@ export function updateStatus(
     const sep = t.fg("dim", " · ");
     let status = t.fg(mode.color, mode.label);
     status += sep + t.fg(sbColor, `sandbox:${sbx}`);
-    if (netEnabled) status += sep + (networkOpen ? t.fg("warning", "net:open") : t.fg("success", "net:filtered"));
+    if (netEnabled) status += sep + (networkOpen ? t.fg("warning", "filter:off") : t.fg("success", "filter:on"));
     if (mode.classifier && classifierLabel) status += sep + t.fg(mode.color, classifierLabel);
     ctx.ui.setStatus("perm", status);
     return;

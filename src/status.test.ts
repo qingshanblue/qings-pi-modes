@@ -37,15 +37,15 @@ test("updateStatus (compact, default): readable tokens for sandbox / network / c
   // sandbox on + filtered network + classifier
   let c = ctx();
   updateStatus(c as never, { ...mode(sbOnFiltered), classifier: true }, ready, false, "AI:current-model", true, "on");
-  assert.equal(c.status, "Build · sandbox:on · net:filtered · AI:current-model");
+  assert.equal(c.status, "Build · sandbox:on · filter:on · AI:current-model");
   // network open
   c = ctx();
   updateStatus(c as never, mode(sbOnFiltered), ready, true, undefined, true, "on");
-  assert.equal(c.status, "Build · sandbox:on · net:open");
+  assert.equal(c.status, "Build · sandbox:on · filter:off");
   // read-only sandbox
   c = ctx();
   updateStatus(c as never, mode({ enabled: true, writable: true, network: { allowedDomains: ["a.com"] } }), ready, false, undefined, true, "strict");
-  assert.equal(c.status, "Build · sandbox:strict · net:filtered");
+  assert.equal(c.status, "Build · sandbox:strict · filter:on");
   // no allowlist → no network token
   c = ctx();
   updateStatus(c as never, mode({ enabled: true, writable: true }), ready, false, undefined, true, "on");
