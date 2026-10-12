@@ -37,27 +37,27 @@ test("updateStatus (compact, default): box / net / AI tokens", () => {
   // sandbox on + network limited + classifier
   let c = ctx();
   updateStatus(c as never, { ...mode(sbOnLimited), classifier: true }, ready, false, "AI:inherit", true, "on");
-  assert.equal(c.status, "Build-box:on-net:limit-AI:inherit");
+  assert.equal(c.status, "Build box:on net:limit AI:inherit");
   // network free
   c = ctx();
   updateStatus(c as never, mode(sbOnLimited), ready, true, undefined, true, "on");
-  assert.equal(c.status, "Build-box:on-net:free");
+  assert.equal(c.status, "Build box:on net:free");
   // strict sandbox
   c = ctx();
   updateStatus(c as never, mode(sbOnLimited), ready, false, undefined, true, "strict");
-  assert.equal(c.status, "Build-box:strict-net:limit");
+  assert.equal(c.status, "Build box:strict net:limit");
   // no allowlist → no network token
   c = ctx();
   updateStatus(c as never, mode({ enabled: true, writable: true }), ready, false, undefined, true, "on");
-  assert.equal(c.status, "Build-box:on");
+  assert.equal(c.status, "Build box:on");
   // sandbox off
   c = ctx();
   updateStatus(c as never, mode({ enabled: false, writable: true }), ready, false, undefined, true, "off");
-  assert.equal(c.status, "Build-box:off");
+  assert.equal(c.status, "Build box:off");
   // sandbox unavailable (degraded)
   c = ctx();
   updateStatus(c as never, mode(sbOnLimited), { ready: false, warn: "nope", disabled: false }, false, undefined, true, "on");
-  assert.equal(c.status, "Build-box:unavailable");
+  assert.equal(c.status, "Build box:unavailable");
 });
 
 test("updateStatus: the classifier AI token only appears in classifier modes", () => {
