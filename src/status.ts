@@ -36,17 +36,18 @@ export function updateStatus(
   const degraded = sb.enabled && !!sandbox.warn && !sandbox.disabled;
 
   if (compact) {
-    // The three sandbox states are color-coded so they read at a glance:
-    // off = red (no boundary) · on = green (the default boundary) ·
-    // strict = accent (the hard boundary) · unavailable = warning.
+    // 颜色即语义（风险/保护梯度）：
+    // box: off=红(无边界) on=黄(默认边界) strict=绿(硬边界) unavailable=灰(运行时不可用)
+    // net: limit=黄(allowlist 生效) free=绿(本会话不过滤)
+    // AI token 不着色（终端默认前景色，通常为白）。
     const state = sandboxState ?? (sb.enabled ? "on" : "off");
     const sbx = !sb.enabled ? "off" : !enforcing ? "unavailable" : state;
-    const sbColor = !sb.enabled ? "error" : !enforcing ? "warning" : state === "strict" ? "accent" : "success";
-    const sep = t.fg("dim", "-");
+    const sbColor = !sb.enabled ? "error" : !enforcing ? "muted" : state === "strict" ? "success" : "warning";
+    const sep = " ";
     let status = t.fg(mode.color, mode.label);
     status += sep + t.fg(sbColor, `box:${sbx}`);
-    if (netEnabled) status += sep + (networkOpen ? t.fg("warning", "net:free") : t.fg("success", "net:limit"));
-    if (mode.classifier && classifierLabel) status += sep + t.fg(mode.color, classifierLabel);
+    if (netEnabled) status += sep + (networkOpen ? t.fg("success", "net:free") : t.fg("warning", "net:limit"));
+    if (mode.classifier && classifierLabel) status += sep + classifierLabel;
     ctx.ui.setStatus("perm", status);
     return;
   }
