@@ -61,7 +61,13 @@ describe("remote-ask: telegram value mapping", () => {
     assert.equal(tgValueToSemantic("deny"), "deny");
     assert.equal(tgValueToSemantic("cancel"), "deny");
     assert.equal(tgValueToSemantic(undefined), "deny");
+    // Exact values only: substrings must never promote an answer to a grant.
     assert.equal(tgValueToSemantic("garbage"), "deny");
+    assert.equal(tgValueToSemantic("deny-session"), "deny");
+    assert.equal(tgValueToSemantic("no-session"), "deny");
+    assert.equal(tgValueToSemantic("block-always"), "deny");
+    assert.equal(tgValueToSemantic("deny-once"), "deny");
+    assert.equal(tgValueToSemantic("ALLOW"), "deny");
   });
 
   it("resolveAnswer: terminal labels pass through, telegram values map via semantics", () => {

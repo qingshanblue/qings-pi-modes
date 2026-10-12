@@ -52,15 +52,28 @@ export function guardrailsPayload(kind: GuardrailsKind, opts: {
 
 /**
  * Map a guardrails button value (the Telegram side) to a semantic choice.
- * Unknown values deny — the caller treats that as "no permission granted".
+ *
+ * EXACT values only — the earlier substring test (`value.includes("session")`)
+ * was fail-open: `deny-session`, `no-session`, or `block-always` from any
+ * sender would have granted a session or forever approval the label never
+ * offered. Anything not in this table denies.
  */
+const TG_VALUES: Record<string, AskSemantic> = {
+  allow: "once",
+  "allow-session": "session",
+  "allow-file-once": "once",
+  "allow-file-session": "session",
+  "allow-file-always": "forever",
+  "allow-dir-once": "once",
+  "allow-dir-session": "session",
+  "allow-dir-always": "forever",
+  deny: "deny",
+  cancel: "deny",
+};
+
 export function tgValueToSemantic(value: string | undefined): AskSemantic {
   if (value === undefined) return "deny";
-  if (value === "deny" || value === "cancel") return "deny";
-  if (value.includes("always")) return "forever";
-  if (value.includes("once") || value === "allow") return "once";
-  if (value.includes("session")) return "session";
-  return "deny";
+  return TG_VALUES[value] ?? "deny";
 }
 
 /** Which option label each semantic choice resolves to (per call site). */

@@ -1540,6 +1540,60 @@ test("sandbox: a pinned mode overrides alt+s, and the state outlives the mode", 
   }
 });
 
+test("sandbox: a persisted `strict` state survives a restart, and the removed `ro` never does", { skip }, async () => {
+  const strict = await setup({ entries: [{ type: "custom", customType: "perm-sandbox", data: { state: "strict" } }] });
+  try {
+    assert.equal(process.env.PI_PERMISSION_SANDBOX, "strict"); // was silently downgraded to "on"
+  } finally {
+    strict.cleanup();
+  }
+  const ro = await setup({ entries: [{ type: "custom", customType: "perm-sandbox", data: { state: "ro" } }] });
+  try {
+    assert.equal(process.env.PI_PERMISSION_SANDBOX, "on"); // "ro" no longer exists -> the "on" default
+  } finally {
+    ro.cleanup();
+  }
+});
+
+test("unsandboxed modes still honor external_directory for out-of-project bash", { skip }, async () => {
+  const h = await setup();
+  try {
+    // A custom unsandboxed mode: bash is allowed, but outside paths are "ask".
+    const dir = path.join(h.agentDir, "permission-mode");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, "permission-mode.json"),
+      JSON.stringify({
+        cycleOrder: ["loose"],
+        defaultMode: "loose",
+        modes: {
+          loose: {
+            label: "Loose",
+            color: "mdLink",
+            sandbox: { enabled: false, writable: true },
+            permission: { bash: { "*": "allow" }, external_directory: "ask" },
+          },
+        },
+      }),
+    );
+    const restarted = await setup(); // re-read the global config
+    try {
+      // In-project stays silent (the whitelist covers it) ...
+      assert.equal(await restarted.call("bash", { command: "cat README.md" }), undefined);
+      assert.equal(restarted.ctx.prompts.length, 0);
+      // ... the out-of-project read prompts instead of running unprompted.
+      restarted.ctx.answers.push("Deny");
+      const res = await restarted.call("bash", { command: "cat /etc/hostname" });
+      assert.equal(res?.block, true);
+      assert.match(restarted.ctx.prompts.at(-1)?.title ?? "", /outside project/);
+    } finally {
+      restarted.cleanup();
+    }
+  } finally {
+    h.cleanup();
+  }
+});
+
 test("sandbox: the session state is restored from the persisted entry", { skip }, async () => {
   const h = await setup({ entries: [{ type: "custom", customType: "perm-sandbox", data: { state: "off" } }] });
   try {

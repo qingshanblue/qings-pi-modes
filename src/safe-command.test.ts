@@ -7,6 +7,31 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { isSafeBashChain, isSafeCommand } from "./safe-command.ts";
 
+test("isSafeCommand: refuses writers/executors that look read-only (regression set)", () => {
+  // find's action flags: -execdir/-okdir execute, -fprint*/-fls write.
+  assert.equal(isSafeCommand("find", [".", "-name", "*.tmp", "-execdir", "rm", "-f", "{}", ";"]), false);
+  assert.equal(isSafeCommand("find", [".", "-okdir", "rm", "{}", ";"]), false);
+  assert.equal(isSafeCommand("find", [".", "-fprintf", "/tmp/out", "%p"]), false);
+  assert.equal(isSafeCommand("find", [".", "-fls", "/tmp/out"]), false);
+  // sed is off the list entirely: its `e` command (and GNU's `s///e`) executes.
+  assert.equal(isSafeCommand("sed", ["-n", "1p", "f"]), false);
+  assert.equal(isSafeCommand("sed", ["1e", "sh"]), false);
+  assert.equal(isSafeCommand("sed", ["-i.bak", "s/a/b/", "f"]), false);
+  assert.equal(isSafeCommand("sed", ["--in-place=.bak", "s/a/b/", "f"]), false);
+  // Short/long output flags of the commands that have them.
+  assert.equal(isSafeCommand("sort", ["-o", "out.txt", "in.txt"]), false);
+  assert.equal(isSafeCommand("sort", ["--output=out.txt", "in.txt"]), false);
+  assert.equal(isSafeCommand("tree", ["-o", "out.txt"]), false);
+  assert.equal(isSafeCommand("uniq", ["in.txt", "out.txt"]), false);
+  assert.equal(isSafeCommand("git", ["diff", "--output=patch.diff"]), false);
+  // ... while the read-only spellings of the same letters stay allowed.
+  assert.equal(isSafeCommand("grep", ["-i", "needle", "f"]), true);
+  assert.equal(isSafeCommand("grep", ["-o", "pattern", "f"]), true);
+  assert.equal(isSafeCommand("sort", ["-n", "in.txt"]), true);
+  assert.equal(isSafeCommand("uniq", ["in.txt"]), true);
+  assert.equal(isSafeCommand("find", [".", "-name", "x", "-print"]), true);
+});
+
 test("isSafeCommand: read-only allowlist, git read-only subcommands, dangerous flags", () => {
   assert.equal(isSafeCommand("ls", ["-la"]), true);
   assert.equal(isSafeCommand("/usr/bin/cat", ["README.md"]), true);
@@ -16,7 +41,7 @@ test("isSafeCommand: read-only allowlist, git read-only subcommands, dangerous f
   assert.equal(isSafeCommand("git", ["push"]), false);
   assert.equal(isSafeCommand("rm", ["-rf", "x"]), false);
   assert.equal(isSafeCommand("sed", ["-i", "s/a/b/", "f"]), false); // in-place write
-  assert.equal(isSafeCommand("sed", ["s/a/b/", "f"]), true);
+  assert.equal(isSafeCommand("sed", ["s/a/b/", "f"]), false); // sed is off the list (the `e` command executes)
   assert.equal(isSafeCommand("find", [".", "-delete"]), false);
   assert.equal(isSafeCommand("find", [".", "-name", "*.md"]), true);
   assert.equal(isSafeCommand("node", ["-e", "1"]), false); // arbitrary code

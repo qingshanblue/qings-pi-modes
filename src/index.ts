@@ -93,7 +93,7 @@ import {
   showPlanSucceeded,
   shownPlanPath,
 } from "./plan-approval.ts";
-import { decide, decideBashChain } from "./resolve.ts";
+import { decide, decideBashChain, mostRestrictive } from "./resolve.ts";
 import { SandboxController, commandFilesDir, networkFiltered, runtimeInstallDir, withDeniedReads } from "./sandbox.ts";
 import { ensureScratchDir, scratchBase, scratchBaseOverridden, scratchDirName, sweepScratchDirs, withScratchDir } from "./scratch.ts";
 import {
@@ -132,6 +132,13 @@ interface AskReview {
   /** True when the target lies outside the project. */
   isOutside?: boolean;
   /** True when approving would run bash UNSANDBOXED — never auto-approved. */
+  /**
+   * Recorded on every prompt that would run the command OUTSIDE the sandbox
+   * (an escape/privilege ask, or any ask in a mode whose sandbox is off).
+   * Informational: in a classifier mode the reviewer decides these asks too
+   * (see README, "AI auto 模式") — approving one marks the call for unsandboxed
+   * execution, so the classifier can grant an unsandboxed run.
+   */
   escalateToHuman?: boolean;
 }
 
@@ -186,10 +193,10 @@ export default async function (pi: ExtensionAPI) {
   // effective profile's denyRead so the OS sandbox masks them for bash, and
   // checked directly for the (unsandboxed) file tools.
   const blocked = new BlockedPaths();
-  // The sandbox is DECOUPLED from the mode: `alt+m` cycles this session state
-  // (`off` / `on` / `ro`), and a mode may pin it (`sandboxPin`, e.g. Plan → ro).
-  // The shared profile (allowWrite / denyRead / network / …) lives in
-  // `config.sandbox`; a mode's own legacy `sandbox` still overrides it.
+  // The sandbox is DECOUPLED from the mode: `alt+s` cycles this session state
+  // (`off` / `on` / `strict`), and a mode may pin it (`sandboxPin`; no built-in
+  // mode does). The shared profile (allowWrite / denyRead / network / …) lives
+  // in `config.sandbox`; a mode's own legacy `sandbox` still overrides it.
   let sessionSandboxState: SandboxState = "on";
   /** A minimal safe profile when a config somehow lacks the top-level sandbox. */
   const FALLBACK_SANDBOX: SandboxProfile = {
@@ -1189,7 +1196,7 @@ export default async function (pi: ExtensionAPI) {
     // Restore the sandbox state: forwarded env > persisted entry > the "on"
     // default. It is exported so child pi processes inherit the same state.
     {
-      const valid = (v: unknown): v is SandboxState => v === "off" || v === "on" || v === "ro";
+      const valid = (v: unknown): v is SandboxState => v === "off" || v === "on" || v === "strict";
       const envSb = process.env.PI_PERMISSION_SANDBOX;
       if (valid(envSb)) sessionSandboxState = envSb;
       else
@@ -1350,14 +1357,20 @@ export default async function (pi: ExtensionAPI) {
       // its policy is `allow`; an unsandboxed `ask` mode must still prompt.
       if (!modeSandbox(m).enabled) {
         const action = decide(m, "bash", command);
+        // Without the OS sandbox there is no escape prompt, so the documented
+        // layer for out-of-project access is the mode's `external_directory`
+        // policy (the sandbox-free analogue of the escape gate). Fold it in
+        // most-restrictively: a mode may allow bash and still ask for paths
+        // outside the project.
+        const analysis = await analyzeBash(command, root, bounds);
+        const outside = analysis.outsideReason;
+        const effective: Action =
+          outside ? mostRestrictive(action, decide(m, "external_directory", command, { isOutside: true })) ?? action : action;
         // Tier 1 whitelist applies here too: with the sandbox off there is no
         // OS confinement, so a read-only command is safe to auto-run — and it
         // saves a classifier call for every whitelisted bash in auto mode.
-        if (action === "ask") {
-          const analysis = await analyzeBash(command, root, bounds);
-          if (!analysis.outsideReason && isSafeBashChain(analysis.commands, command)) return undefined;
-        }
-        const gate = bashGate(action, undefined, false, sandbox.ready);
+        if (effective === "ask" && !outside && isSafeBashChain(analysis.commands, command)) return undefined;
+        const gate = bashGate(effective, outside, false, sandbox.ready);
         if (gate.kind === "block") return { block: true, reason: gate.reason };
         if (gate.kind === "prompt") {
           // Without an AST parse, scope a session grant to the exact command.

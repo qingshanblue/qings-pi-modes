@@ -131,9 +131,9 @@ export interface ModeDef {
   injectSandboxInfo?: boolean;
   sandbox?: SandboxProfile;
   /**
-   * Force the sandbox state while this mode is active (`off` | `on` | `ro`).
-   * Overrides the session's `alt+s` state (R1 in the design), restored when the
-   * mode is left. Only Plan ships one (`ro`). Absent = use the session state.
+   * Force the sandbox state while this mode is active (`off` | `on` | `strict`).
+   * Overrides the session's `alt+s` state, restored when the mode is left.
+   * No built-in mode ships one; absent = use the session state.
    */
   sandboxPin?: SandboxState;
   permission: Partial<Record<Surface, SurfaceValue>>;

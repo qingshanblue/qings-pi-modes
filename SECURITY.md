@@ -29,6 +29,15 @@ you can rely on it appropriately.
 
 ## Known limitations (read these)
 
+- **The Tier-1 read-only whitelist is a convenience fast path, not a boundary.**
+  It auto-approves a bash command only when every extracted command is a known
+  read-only one, the raw text has no redirect or command substitution, and no
+  argument is a writer/executor flag (`find -execdir`, `sort -o`, `uniq in out`,
+  `git … --output=`, …). `sed` is deliberately absent (its `e` command executes
+  shell commands). The list is conservative and errs toward prompting; treat it
+  as a way to avoid noise for `ls`/`cat`/`grep`, never as containment. It only
+  applies when the policy resolved to `ask` — an explicit `deny` still blocks.
+
 - **The AI classifier (`auto` mode) is a heuristic gate, not a boundary.** It
   reviews a pending tool call with an LLM and can be wrong in both directions.
   Its input includes model-authored text (the command and its arguments), so a
