@@ -1016,7 +1016,7 @@ test("multi-line bash commands: policy applies across newlines (no silent allow,
   }
 });
 
-test("network: /net allow + status, request tool degrades gracefully, alt+n informs", { skip }, async () => {
+test("network: /net allow + status, request tool degrades gracefully, ctrl+n informs", { skip }, async () => {
   const h = await setup();
   try {
     // Degraded (--no-sandbox): nothing filters — the tool says so instead of prompting.
@@ -1037,8 +1037,8 @@ test("network: /net allow + status, request tool degrades gracefully, alt+n info
     await h.pi.commands.get("net")!("allow *", h.ctx);
     assert.match(h.ctx.notices.at(-1) ?? "", /usage: \/net allow/);
 
-    // alt+n with nothing enforcing explains itself instead of silently toggling.
-    await h.pi.shortcuts.get("alt+n")!(h.ctx);
+    // ctrl+n with nothing enforcing explains itself instead of silently toggling.
+    await h.pi.shortcuts.get("ctrl+n")!(h.ctx);
     assert.match(h.ctx.notices.at(-1) ?? "", /not filtered in this mode\/state/);
 
     // /net reset clears the grants.
@@ -1445,12 +1445,12 @@ test("/classifier-model: a bare call opens the picker, picking persists", { skip
   }
 });
 
-// --- sandbox decoupling (alt+s / pin) ---------------------------------------
+// --- sandbox decoupling (ctrl+g / pin) ---------------------------------------
 
-test("sandbox: ctrl+s cycles off/on/strict and /sandbox sets it", { skip }, async () => {
+test("sandbox: ctrl+g cycles off/on/strict and /sandbox sets it", { skip }, async () => {
   const h = await setup();
   try {
-    const ctrlS = h.pi.shortcuts.get("ctrl+s")!;
+    const ctrlS = h.pi.shortcuts.get("ctrl+g")!;
     await ctrlS(h.ctx); // on → strict
     assert.deepEqual(h.pi.entries.at(-1), { customType: "perm-sandbox", data: { state: "strict" } });
     await ctrlS(h.ctx); // strict → off
@@ -1467,7 +1467,7 @@ test("sandbox: ctrl+s cycles off/on/strict and /sandbox sets it", { skip }, asyn
   }
 });
 
-test("sandbox: a pinned mode overrides ctrl+s, and the state outlives the mode", { skip }, async () => {
+test("sandbox: a pinned mode overrides ctrl+g, and the state outlives the mode", { skip }, async () => {
   const h = await setup();
   try {
     const dir = path.join(h.agentDir, "permission-mode");
@@ -1478,7 +1478,7 @@ test("sandbox: a pinned mode overrides ctrl+s, and the state outlives the mode",
     );
     await h.pi.emit("session_start", {}, h.ctx);
     await h.perm("locked");
-    await h.pi.shortcuts.get("ctrl+s")!(h.ctx); // session: on → strict
+    await h.pi.shortcuts.get("ctrl+g")!(h.ctx); // session: on → strict
     assert.deepEqual(h.pi.entries.at(-1), { customType: "perm-sandbox", data: { state: "strict" } });
     // Strict: an out-of-project command is blocked outright, no prompt.
     const sealed = await h.call("bash", { command: "cat /etc/hostname" });
@@ -1491,8 +1491,8 @@ test("sandbox: a pinned mode overrides ctrl+s, and the state outlives the mode",
     assert.equal(still?.block, true);
     assert.match(still?.reason ?? "", /Sandbox strict/);
 
-    // ctrl+s (strict → off): the boundary opens for every mode.
-    await h.pi.shortcuts.get("ctrl+s")!(h.ctx);
+    // ctrl+g (strict → off): the boundary opens for every mode.
+    await h.pi.shortcuts.get("ctrl+g")!(h.ctx);
     assert.deepEqual(h.pi.entries.at(-1), { customType: "perm-sandbox", data: { state: "off" } });
     h.ctx.answers.push("Deny");
     const opened = await h.call("bash", { command: "cat /etc/hostname" });

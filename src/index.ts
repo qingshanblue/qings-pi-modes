@@ -47,7 +47,8 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { createBashTool, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { askWithSession, BlockedPaths, type DenyOption, SessionApprovals } from "./approvals.ts";
+import { askWithSession, BlockedPaths, type ApprovalUI, type AskRequest, type DenyOption, ASK_LABELS, SessionApprovals } from "./approvals.ts";
+import { dualSelect, guardrailsPayload, type DualSelectUI, type GuardrailsKind } from "./remote-ask.ts";
 import { sandboxAwarenessPrompt } from "./awareness.ts";
 import { bashExecPlan, bashGate } from "./bash-enforce.ts";
 import { analyzeBash, escapeTargetFromReason, escapingPaths } from "./bash-parse.ts";
@@ -278,15 +279,61 @@ export default async function (pi: ExtensionAPI) {
   let uiCtx: ExtensionContext | undefined;
 
   /** Prompt the user about a blocked host (the connection waits meanwhile). */
+  const PATH_SURFACES: readonly string[] = ["path", "external_directory", "read", "write", "edit", "grep", "find", "ls"];
+
+  /** Build the dual-surface ask for one approval (payload kind + Telegram value map). */
+  const dualApprovalAsk = (ctx: ExtensionContext, req: AskRequest): Promise<string | undefined> => {
+    const kind: GuardrailsKind =
+      req.hasDenyAnd || PATH_SURFACES.includes(req.surface) ? "pathAccess" : "permissionGate";
+    const first = req.targets[0] ?? "*";
+    return dualSelect(ctx.ui as unknown as DualSelectUI, pi, {
+      title: req.title,
+      options: req.options,
+      payload: guardrailsPayload(kind, {
+        tool: req.surface,
+        command: kind === "permissionGate" ? first : undefined,
+        path: kind === "pathAccess" ? first : undefined,
+        reason: req.title,
+      }),
+      // Telegram's guardrails buttons carry no "deny and block" — from Telegram a
+      // plain deny is the honest equivalent (the path stays unblocked).
+      semantic: {
+        once: ASK_LABELS.once,
+        session: ASK_LABELS.session,
+        forever: req.hasForever ? ASK_LABELS.forever : ASK_LABELS.session,
+        deny: ASK_LABELS.deny,
+      },
+    });
+  };
+
+  /** ApprovalUI with the dual-surface ask wired in. */
+  const approvalUI = (ctx: ExtensionContext): ApprovalUI => ({
+    hasUI: ctx.hasUI,
+    select: (t, o) => ctx.ui.select(t, o),
+    dual: (req) => dualApprovalAsk(ctx, req),
+  });
+
   const askNetHost = async (host: string, port: number | undefined): Promise<NetAskResult> => {
     const ctx = uiCtx;
     if (!ctx?.hasUI || effectiveSandbox(currentMode()).askOnBlockedHost === false) return "dismiss";
     const target = port !== undefined ? `${host}:${port}` : host;
-    const choice = await ctx.ui.select(`Network: bash wants to reach ${target} (not in the allowlist) — allow?`, [
-      "Allow for session",
-      "Allow forever",
-      "Deny",
-    ]);
+    const title = `Network: bash wants to reach ${target} (not in the allowlist) — allow?`;
+    const choice = await dualSelect(ctx.ui as unknown as DualSelectUI, pi, {
+      title,
+      options: ["Allow for session", "Allow forever", "Deny"],
+      payload: guardrailsPayload("permissionGate", {
+        tool: "network",
+        command: target,
+        reason: title,
+      }),
+      // Network grants have no "once" — a Telegram "allow once" grants the session.
+      semantic: {
+        once: "Allow for session",
+        session: "Allow for session",
+        forever: "Allow forever",
+        deny: "Deny",
+      },
+    });
     if (choice === "Allow for session") return "allow-session";
     if (choice === "Allow forever") {
       try {
@@ -319,7 +366,7 @@ export default async function (pi: ExtensionAPI) {
   ): Promise<boolean> => {
     const humanPrompt = (): Promise<boolean> =>
       askWithSession(
-        { hasUI: ctx.hasUI, select: (t, o) => ctx.ui.select(t, o) },
+        approvalUI(ctx),
         approvals,
         modeName,
         surface,
@@ -394,7 +441,7 @@ export default async function (pi: ExtensionAPI) {
       return autoDecide(ctx, surface, target, title, onForever, denyAnd, review);
     }
     return askWithSession(
-      { hasUI: ctx.hasUI, select: (t, o) => ctx.ui.select(t, o) },
+      approvalUI(ctx),
       approvals,
       modeName,
       surface,

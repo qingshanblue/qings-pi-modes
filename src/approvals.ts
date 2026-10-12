@@ -85,16 +85,33 @@ export interface DenyOption {
   run: () => void | Promise<void>;
 }
 
-/** Minimal UI surface needed by `askWithSession` (a subset of ctx.ui + hasUI). */
+/** Everything the dual-surface ask needs to know about one pending approval. */
+export interface AskRequest {
+  title: string;
+  options: string[];
+  surface: Surface;
+  targets: string[];
+  hasForever: boolean;
+  hasDenyAnd: boolean;
+}
+
+/** Minimal UI surface needed by `askWithSession` (a subset of ctx.ui + hasUI).
+ * `dual`, when given, renders the same prompt on both surfaces (terminal overlay
+ * + Telegram card, first answer wins) — see remote-ask.ts. */
 export interface ApprovalUI {
   hasUI: boolean;
   select(title: string, options: string[]): Promise<string | undefined>;
+  dual?(req: AskRequest): Promise<string | undefined>;
 }
 
 const ALLOW_ONCE = "Allow once";
 const ALLOW_SESSION = "Allow for session";
 const ALLOW_FOREVER = "Allow forever";
 const DENY = "Deny";
+
+/** Option labels by semantic choice — lets remote surfaces (Telegram) map
+ * guardrail-style button values onto this module's vocabulary. */
+export const ASK_LABELS = { once: ALLOW_ONCE, session: ALLOW_SESSION, forever: ALLOW_FOREVER, deny: DENY } as const;
 
 /**
  * Prompt for approval, honoring prior "Allow for session" grants. Returns true
@@ -128,7 +145,9 @@ export async function askWithSession(
 
   const options = onForever ? [ALLOW_ONCE, ALLOW_SESSION, ALLOW_FOREVER, DENY] : [ALLOW_ONCE, ALLOW_SESSION, DENY];
   if (denyAnd) options.push(denyAnd.label); // "Deny and block … for this session"
-  const choice = await ui.select(title, options);
+  const choice = ui.dual
+    ? await ui.dual({ title, options, surface, targets, hasForever: onForever !== undefined, hasDenyAnd: denyAnd !== undefined })
+    : await ui.select(title, options);
   if (denyAnd && choice === denyAnd.label) {
     await denyAnd.run();
     return false;
