@@ -55,8 +55,11 @@ import path from "node:path";
 import { askWithSession, BlockedPaths, type ApprovalUI, type DenyOption, SessionApprovals } from "./approvals.ts";
 import { allModeNames, buildBashAskReview, buildFileToolAskReview, compactTitle, fileToolAllowedRoots, modePickerOptions, type AskReview } from "./action.ts";
 import { sandboxAwarenessPrompt } from "./awareness.ts";
-import { bashExecPlan, bashGate, isBenignOutsideRead } from "./bash-enforce.ts";
-import { analyzeBash, escapeTargetFromReason, escapingPaths, reviewBashScripts } from "./bash-parse.ts";
+import { bashExecPlan } from "./bash-enforce.ts";
+import { planSandboxedBash, planUnsandboxedBash, type BashPlan } from "./bash-plan.ts";
+import { analyzeBash, reviewBashScripts, type ScriptReview } from "./bash-parse.ts";
+
+type ScriptReviewResult = { inspectable: boolean; scripts: ScriptReview[] };
 import { isSafeBashChain } from "./safe-command.ts";
 import {
   auditStaleDefaults,
@@ -1302,6 +1305,37 @@ export default async function (pi: ExtensionAPI) {
     return undefined; // allow → continue to expansion
   });
 
+  /** Carry out a bash plan: prompt (with session keys and escape targets), or pass through. */
+  const applyBashPlan = async (
+    ctx: ExtensionContext,
+    toolCallId: string,
+    plan: BashPlan,
+    command: string,
+    scriptReview: ScriptReviewResult,
+  ): Promise<{ block: true; reason: string } | undefined> => {
+    if (plan.kind === "allow") return undefined;
+    if (plan.kind === "block") return { block: true, reason: plan.reason };
+    const approved = await promptAllow(
+      ctx,
+      "bash",
+      plan.keys,
+      bashTitle(plan.title, command),
+      undefined,
+      plan.targets.length > 0 ? denyAndBlock(ctx, plan.targets) : undefined,
+      buildBashAskReview({
+        command,
+        outsideReason: plan.outsideReason,
+        sandboxReady: plan.sandboxReady,
+        sandboxEnabled: plan.sandboxEnabled,
+        unsandboxed: plan.unsandboxed,
+        scriptReview,
+      }),
+    );
+    if (!approved) return { block: true, reason: plan.reason };
+    if (plan.unsandboxed) approvedUnsandboxed.add(toolCallId);
+    return undefined;
+  };
+
   pi.on("tool_call", async (event, ctx) => {
     uiCtx = ctx;
     const { toolName } = event;
@@ -1331,138 +1365,46 @@ export default async function (pi: ExtensionAPI) {
       }
     }
 
-    // Bash.
+    // Bash. The decision is pure (bash-plan.ts); this branch gathers facts and
+    // carries out the plan (prompt, block, unsandboxed bookkeeping).
     if (toolName === "bash") {
       const command = String(input.command ?? "");
-      // Fast path: non-sandboxing modes skip AST escape analysis, but still
-      // honor their explicit bash policy. Bypass/Accept remains silent because
-      // its policy is `allow`; an unsandboxed `ask` mode must still prompt.
       if (!modeSandbox(m).enabled) {
-        const action = decide(m, "bash", command);
-        // Without the OS sandbox there is no escape prompt, so the documented
-        // layer for out-of-project access is the mode's `external_directory`
-        // policy (the sandbox-free analogue of the escape gate). Fold it in
-        // most-restrictively: a mode may allow bash and still ask for paths
-        // outside the project.
+        // Without the OS sandbox there is no escape prompt, so the layer for
+        // out-of-project access is the mode's `external_directory` policy,
+        // folded in most-restrictively.
         const analysis = await analyzeBash(command, root, bounds);
-        const outside = analysis.outsideReason;
+        const action = decide(m, "bash", command);
         const effective: Action =
-          outside ? mostRestrictive(action, decide(m, "external_directory", command, { isOutside: true })) ?? action : action;
-        // Tier 1 whitelist applies here too: with the sandbox off there is no
-        // OS confinement, so a read-only command is safe to auto-run — and it
-        // saves a classifier call for every whitelisted bash in auto mode.
-        if (effective === "ask" && !outside && isSafeBashChain(analysis.commands, command)) return undefined;
-        const gate = bashGate(effective, outside, false, sandbox.ready);
+          analysis.outsideReason ? mostRestrictive(action, decide(m, "external_directory", command, { isOutside: true })) ?? action : action;
         const scriptReview = reviewBashScripts(analysis.commands, root, command, analysis.usedFallback, bounds);
-        if (gate.kind === "block") return { block: true, reason: gate.reason };
-        if (gate.kind === "prompt") {
-          // Without an AST parse, scope a session grant to the exact command.
-          if (
-            !(await promptAllow(ctx, "bash", command, bashTitle(gate.title, command), undefined, undefined, {
-              ...buildBashAskReview({
-                command,
-                outsideReason: outside,
-                sandboxReady: false,
-                sandboxEnabled: false,
-                unsandboxed: gate.onApproveUnsandboxed,
-                scriptReview,
-              }),
-            }))
-          ) {
-            return { block: true, reason: gate.reason };
-          }
-          if (gate.onApproveUnsandboxed) approvedUnsandboxed.add(event.toolCallId);
-        }
-        return undefined;
+        const plan = planUnsandboxedBash({
+          command,
+          effective,
+          outsideReason: analysis.outsideReason,
+          safeChain: isSafeBashChain(analysis.commands, command),
+          sandboxReady: sandbox.ready,
+        });
+        return applyBashPlan(ctx, event.toolCallId, plan, command, scriptReview);
       }
       // Real AST when available: judge each (possibly nested) command against the
-      // bash surface AND the cross-cutting path gate (joined string + each token,
-      // see decideBashCommand), most-restrictive across the chain; detect
-      // escapes/privilege.
+      // bash surface AND the cross-cutting path gate, most-restrictive across the chain.
       const analysis = await analyzeBash(command, root, bounds);
-      // A command no layer matches falls back to "ask" (see decideBashChain).
-      const action: Action =
-        analysis.commands.length > 0 ? decideBashChain(m, analysis.commands) : decide(m, "bash", command);
-      const safeChain = isSafeBashChain(analysis.commands, command);
+      const action: Action = analysis.commands.length > 0 ? decideBashChain(m, analysis.commands) : decide(m, "bash", command);
       const scriptReview = reviewBashScripts(analysis.commands, root, command, analysis.usedFallback, bounds);
-      // Tier 1 fast path: a known read-only command in-bounds runs without prompting
-      // or classifier review (shared by Ask / Edits / Auto). Escapes never qualify.
-      if (action === "ask" && !analysis.outsideReason && safeChain) {
-        return undefined;
-      }
-      // A read-only, non-privilege out-of-project access under a sandbox that WILL
-      // enforce is not a real escape (the sandbox already permits outside reads):
-      // keep it sandboxed and let the policy/classifier gate it — instead of
-      // escalating to a human and running it UNSANDBOXED once approved.
-      const benignOutsideRead = isBenignOutsideRead({
-        outsideReason: analysis.outsideReason,
-        safeChain,
-        usedFallback: analysis.usedFallback,
-        sandboxEnabled: modeSandbox(m).enabled,
+      const plan = planSandboxedBash({
+        command,
+        root,
+        bounds,
+        action,
+        analysis,
+        safeChain: isSafeBashChain(analysis.commands, command),
+        sandboxEnabled: true,
         sandboxState: effectiveSandboxState(m),
         sandboxReady: sandbox.ready,
+        isBlocked: (target) => blocked.covers(target),
       });
-      // `escape` drives the prompt/keys/targets below; the classifier still sees
-      // `isOutside` from the raw reason, so it can deny a secret read on its own.
-      const escape = Boolean(analysis.outsideReason) && !benignOutsideRead;
-      const strict = effectiveSandboxState(m) === "strict";
-      // In the `strict` sandbox state the boundary is hard: out-of-project access
-      // is blocked outright (no prompt, no escape) — the OS cannot mask system
-      // reads, so this is enforced at the policy layer.
-      if (strict && analysis.outsideReason) {
-        return {
-          block: true,
-          reason: `Sandbox strict: outside-project access is blocked (${analysis.outsideReason})`,
-        };
-      }
-      const gate = bashGate(action, escape ? analysis.outsideReason : undefined, modeSandbox(m).enabled, sandbox.ready);
-      // A benign outside read still needs the prompt to say WHY; without the
-      // escape branch it would just read "Allow bash?". Make clear it stays
-      // sandboxed (unlike a real escape, which runs unsandboxed on approval).
-      if (benignOutsideRead && gate.kind === "prompt") {
-        gate.title = `Allow bash? (${analysis.outsideReason}; runs inside the sandbox)`;
-      }
-      if (gate.kind === "block") return { block: true, reason: gate.reason };
-      if (gate.kind === "prompt") {
-        // Session approvals are keyed on the extracted command names, and ALL
-        // names in a chain must be granted for it to pass silently - "allow git
-        // this session" must not cover `git status && curl ... | sh`. Granting
-        // remembers every name in the chain. Without a parse (heuristic
-        // fallback), the key is the exact command string.
-        //
-        // An ESCAPE (out-of-project path, privilege escalation) is keyed on the
-        // exact command string instead: it runs UNSANDBOXED once approved, so a
-        // name-level grant earned by an in-project `cat README.md` must never
-        // let `cat ~/.ssh/id_rsa` through silently, and an approved escape must
-        // not cover a different one that merely shares its command name.
-        const names = [...new Set(analysis.commands.map((c) => c.name).filter(Boolean))];
-        const keys = escape ? [`escape:${command}`] : names.length > 0 ? names : [command];
-        // Paths this command reaches outside the project (none for privilege
-        // escalation). One already blocked this session: block outright, no
-        // prompt. Otherwise the prompt offers "Deny and block".
-        const targets = escape && analysis.outsideReason?.startsWith("path outside project")
-          ? analysis.usedFallback
-            ? [escapeTargetFromReason(analysis.outsideReason, root)].filter((t): t is string => t !== undefined)
-            : escapingPaths(analysis.commands, root, bounds)
-          : [];
-        const hit = targets.map((t) => canonicalPath(root, t)).find((t) => blocked.covers(t));
-        if (hit) return { block: true, reason: `Path ${displayPath(hit)} is blocked for this session (Deny and block); /perm unblock lifts it` };
-        if (
-          !(await promptAllow(ctx, "bash", keys, bashTitle(gate.title, command), undefined, denyAndBlock(ctx, targets), {
-            ...buildBashAskReview({
-              command,
-              outsideReason: analysis.outsideReason,
-              sandboxReady: sandbox.ready,
-              sandboxEnabled: modeSandbox(m).enabled,
-              unsandboxed: gate.onApproveUnsandboxed,
-              scriptReview,
-            }),
-          }))
-        )
-          return { block: true, reason: gate.reason };
-        if (gate.onApproveUnsandboxed) approvedUnsandboxed.add(event.toolCallId);
-      }
-      return undefined;
+      return applyBashPlan(ctx, event.toolCallId, plan, command, scriptReview);
     }
 
     // File tools (read/edit/write/ls/grep/find).

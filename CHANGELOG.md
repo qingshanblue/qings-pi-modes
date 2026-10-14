@@ -15,6 +15,11 @@ of their values is now outdated; the shipped `auto` system prompt was updated
 to match.
 
 ### Changed
+- **Dispatcher split into pure deciders** (no user-visible behavior change):
+  `src/route.ts` (human vs classifier), `src/action.ts` (ask facts and title
+  helpers), `src/file-gate.ts` (file-tool allow/block/ask), and
+  `src/bash-plan.ts` (bash allow/block/prompt, sandboxed and unsandboxed). The
+  `tool_call` handler now only gathers facts and carries out the plan.
 - **Mode cycle is now `plan → ask → auto → accept`.** `edits` is still a
   built-in mode, selectable with `/permission edits`, but it is no longer in
   `alt+m`'s cycle and the `/permission` picker lists only the cycle.

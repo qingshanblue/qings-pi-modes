@@ -184,7 +184,9 @@ schema 严格（`additionalProperties: false`），所有字段在一处定义�
 3. **模式**：`alt+m` 循环为 `plan → ask → auto → accept`；`accept` 保留；`edits` 保留为具名模式但移出循环。
 4. **迁移**：直接切换，不做影子模式。`src/route.ts` 取代 `autoDecide` 中的布尔标记组合，并由穷举测试约束。
 
-**尚未迁移（后续）**：bash 的 `bashGate` 与文件工具的 `decide` 仍是原有路径，只有"人/AI"裁决统一到 `routeAsk`；完整的 `Action` 归一化与三轴纯函数尚未实现。
+**落地（1.2.0 版本）**：分流决策拆为纯模块：`route.ts`（human/classifier）、`action.ts`（ask 事实与标题）、`file-gate.ts`（文件工具 allow/block/ask）、`bash-plan.ts`（bash 放行/拦截/询问，沙箱与无沙箱两条路径）。`tool_call` 只做事实收集与副作用。
+
+**仍未实现（下一版本候选）**：三轴纯函数 `route(action, policy, containment, egress, grants)` 与完整的 `Action` 类型（当前仍由 `decide`/`decideBashChain` 与各 planner 分别产出事实）；网络域名判定尚未纳入同一路由；web_search 与扩展工具门控仍在 dispatcher 内。
 
 ## 12. 需要你拍板的决策（已由 §11 回答，保留作记录）
 
