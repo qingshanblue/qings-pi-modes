@@ -17,8 +17,8 @@
  *   ask    - every mutating operation asks the human.
  *   edits  - in-project edit/write run without confirmation; bash still asks.
  *   auto   - `ask` decisions go to the AI safety classifier (classifier.ts)
- *            instead of the human; an ask that would run UNSANDBOXED always goes
- *            to the human instead.
+ *            instead of the human; privilege / sandbox escapes still go to the
+ *            human, and inspectable sandbox-off bash may be AI-reviewed.
  *   accept - never asks; still bounded by the sandbox state.
  *
  * The OS sandbox (@anthropic-ai/sandbox-runtime) is the real enforcement for
@@ -53,9 +53,10 @@ import { createBashTool, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { askWithSession, BlockedPaths, type ApprovalUI, type DenyOption, SessionApprovals } from "./approvals.ts";
+import { buildBashAskReview, buildFileToolAskReview, fileToolAllowedRoots, modePickerOptions, type AskReview, allModeNames } from "./action.ts";
 import { sandboxAwarenessPrompt } from "./awareness.ts";
 import { bashExecPlan, bashGate, isBenignOutsideRead } from "./bash-enforce.ts";
-import { analyzeBash, escapeTargetFromReason, escapingPaths, reviewBashScripts, type ScriptReview } from "./bash-parse.ts";
+import { analyzeBash, escapeTargetFromReason, escapingPaths, reviewBashScripts } from "./bash-parse.ts";
 import { isSafeBashChain } from "./safe-command.ts";
 import {
   auditStaleDefaults,
@@ -98,7 +99,7 @@ import {
   showPlanSucceeded,
   shownPlanPath,
 } from "./plan-approval.ts";
-import { decide, decideBashChain, expandHome, mostRestrictive } from "./resolve.ts";
+import { decide, decideBashChain, mostRestrictive } from "./resolve.ts";
 import { SandboxController, commandFilesDir, networkFiltered, runtimeInstallDir, withDeniedReads } from "./sandbox.ts";
 import { ensureScratchDir, scratchBase, scratchBaseOverridden, scratchDirName, sweepScratchDirs, withScratchDir } from "./scratch.ts";
 import {
@@ -127,34 +128,6 @@ import {
   type ClassifierSubject,
   type DenialState,
 } from "./classifier.ts";
-
-/** What the AI classifier needs to judge a pending `ask` (see autoDecide). */
-interface AskReview {
-  /** Tool name as the model should see it (e.g. `bash`, or `skill:<name>`). */
-  tool: string;
-  /** The tool input payload (the classifier bounds it before sending). */
-  input: unknown;
-  /** True when the target lies outside the project. */
-  isOutside?: boolean;
-  /** The command would run outside an enforcing sandbox. */
-  unsandboxed?: boolean;
-  /** True for privilege escalation — always human, even in the opt-in raw mode. */
-  privilege?: boolean;
-  /** True for a genuine escape from an enforcing sandbox — always human. */
-  sandboxEscape?: boolean;
-  /** False when the reviewer cannot fully inspect the payload (scripts, truncation, substitution). */
-  inspectable?: boolean;
-  /** Direct script payloads included in the classifier context. */
-  scripts?: ScriptReview[];
-  /**
-   * Set on every prompt that would run the command OUTSIDE the sandbox. The
-   * default is human-only; a mode with `aiGatesUnsandboxed` may send a fully
-   * inspectable, non-privileged, non-sandbox-escape case to the classifier.
-   */
-  escalateToHuman?: boolean;
-  /** Outside file-tool write/edit: never AI, even with aiGatesUnsandboxed (file tools have no sandbox containment). */
-  neverAI?: boolean;
-}
 
 /** Built-in file tools whose `input.path` is gated against the matching surface. */
 const FILE_TOOL_SURFACE: Record<string, Surface> = {
@@ -332,11 +305,10 @@ export default async function (pi: ExtensionAPI) {
 
   /**
    * Ask the AI classifier about a pending `ask`, falling back to the human
-   * prompt per its policy. The classifier judges in-sandbox asks only: any ask
-   * that would run the command OUTSIDE the sandbox (an escape, privilege
-   * escalation, or a mode with the sandbox off) short-circuits to the human
-   * below. `auto` means the AI is the gate — but only for what the sandbox still
-   * bounds.
+   * prompt per its policy. `routeAsk()` decides the human-vs-classifier split
+   * from pure facts (privilege, sandbox escape, inspectability, mode opt-in).
+   * `auto` means the AI is the gate — but never for privilege escalation,
+   * protected writes, or an uninspectable payload.
    */
   const autoDecide = async (
     ctx: ExtensionContext,
@@ -557,7 +529,7 @@ export default async function (pi: ExtensionAPI) {
   });
 
   pi.registerFlag("perm", {
-    description: `Start in permission mode: ${config.cycleOrder.join(" | ")}`,
+    description: `Start in permission mode: ${allModeNames(config.cycleOrder, config.modes).join(" | ")}`,
     type: "string",
     default: "",
   });
@@ -737,8 +709,8 @@ export default async function (pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       const arg = args.trim().toLowerCase();
       if (arg === "") {
-        if (!ctx.hasUI) return ctx.ui.notify(`permission-mode: usage: /permission [${[...config.cycleOrder, ...Object.keys(config.modes).filter((n) => !config.cycleOrder.includes(n))].join("|")}|init|clear-approvals|blocks|unblock <path>]`, "warning");
-        const options = config.cycleOrder.map((name) => `${name === modeName ? "✓" : " "} ${config.modes[name]?.label ?? name}`);
+        if (!ctx.hasUI) return ctx.ui.notify(`permission-mode: usage: /permission [${allModeNames(config.cycleOrder, config.modes).join("|")}|init|clear-approvals|blocks|unblock <path>]`, "warning");
+        const options = modePickerOptions(config.cycleOrder, Object.fromEntries(Object.entries(config.modes).map(([name, mode]) => [name, mode?.label])), modeName);
         const picked = await ctx.ui.select("Permission mode (alt+m cycles)", options);
         const idx = picked ? options.indexOf(picked) : -1;
         if (idx >= 0) await setMode(config.cycleOrder[idx], ctx);
@@ -794,7 +766,7 @@ export default async function (pi: ExtensionAPI) {
         }
       }
       if (hasMode(config.modes, arg)) await setMode(arg, ctx);
-      else ctx.ui.notify(`permission-mode: unknown mode or subcommand "${arg}"; usage: /permission [${[...config.cycleOrder, ...Object.keys(config.modes).filter((n) => !config.cycleOrder.includes(n))].join("|")}|init|clear-approvals|blocks|unblock <path>]`, "warning");
+      else ctx.ui.notify(`permission-mode: unknown mode or subcommand "${arg}"; usage: /permission [${allModeNames(config.cycleOrder, config.modes).join("|")}|init|clear-approvals|blocks|unblock <path>]`, "warning");
     },
   });
   /** Persist a classifier model ref and refresh the live session state. */
@@ -1409,14 +1381,14 @@ export default async function (pi: ExtensionAPI) {
           // Without an AST parse, scope a session grant to the exact command.
           if (
             !(await promptAllow(ctx, "bash", command, bashTitle(gate.title, command), undefined, undefined, {
-              tool: "bash",
-              input: { command },
-              escalateToHuman: gate.onApproveUnsandboxed,
-              privilege: outside?.startsWith("privilege escalation") === true,
-              sandboxEscape: false,
-              inspectable: scriptReview.inspectable,
-              scripts: scriptReview.scripts,
-              unsandboxed: gate.onApproveUnsandboxed,
+              ...buildBashAskReview({
+                command,
+                outsideReason: outside,
+                sandboxReady: false,
+                sandboxEnabled: false,
+                unsandboxed: gate.onApproveUnsandboxed,
+                scriptReview,
+              }),
             }))
           ) {
             return { block: true, reason: gate.reason };
@@ -1499,15 +1471,14 @@ export default async function (pi: ExtensionAPI) {
         if (hit) return { block: true, reason: `Path ${displayPath(hit)} is blocked for this session (Deny and block); /perm unblock lifts it` };
         if (
           !(await promptAllow(ctx, "bash", keys, bashTitle(gate.title, command), undefined, denyAndBlock(ctx, targets), {
-            tool: "bash",
-            input: { command },
-            isOutside: Boolean(analysis.outsideReason),
-            escalateToHuman: gate.onApproveUnsandboxed,
-            privilege: analysis.outsideReason?.startsWith("privilege escalation") === true,
-            sandboxEscape: Boolean(analysis.outsideReason) && sandbox.ready && modeSandbox(m).enabled,
-            inspectable: scriptReview.inspectable,
-            scripts: scriptReview.scripts,
-            unsandboxed: gate.onApproveUnsandboxed,
+            ...buildBashAskReview({
+              command,
+              outsideReason: analysis.outsideReason,
+              sandboxReady: sandbox.ready,
+              sandboxEnabled: modeSandbox(m).enabled,
+              unsandboxed: gate.onApproveUnsandboxed,
+              scriptReview,
+            }),
           }))
         )
           return { block: true, reason: gate.reason };
@@ -1528,7 +1499,7 @@ export default async function (pi: ExtensionAPI) {
       // Global `outsideWriteRoots`: an explicit, static write allowance for
       // edits outside the project (protected paths were already blocked above).
       // Reads and ls/grep/find are unaffected.
-      const writeRoots = surface === "write" || surface === "edit" ? (config.outsideWriteRoots ?? []).map((r) => canonicalPath(root, expandHome(r))) : [];
+      const writeRoots = fileToolAllowedRoots(root, surface, config.outsideWriteRoots);
       const outside = isOutside(root, path, [...bounds, ...writeRoots]);
       // Sandbox `strict`: the boundary is hard for file tools too.
       if (effectiveSandboxState(m) === "strict" && outside) {
@@ -1563,13 +1534,7 @@ export default async function (pi: ExtensionAPI) {
         const escalate = outside && (surface === "write" || surface === "edit");
         if (
           !(await promptAllow(ctx, surface, path, title, undefined, denyAnd, {
-            tool: toolName,
-            input: { path },
-            isOutside: outside,
-            escalateToHuman: escalate,
-            neverAI: escalate,
-            inspectable: true,
-            unsandboxed: outside && (surface === "write" || surface === "edit"),
+            ...buildFileToolAskReview({ tool: toolName, path, outside, surface }),
           }))
         )
           return { block: true, reason };

@@ -53,7 +53,7 @@
 
 ```bash
 npm run typecheck            # 应为干净
-npm test                     # 预期 290 项 / 288 通过（2 个 NixOS 环境性失败，见下）
+npm test                     # 预期 295 项 / 293 通过（2 个 NixOS 环境性失败，见下）
 npm pack --dry-run --json    # 校验打包内容
 ```
 
@@ -62,7 +62,7 @@ npm pack --dry-run --json    # 校验打包内容
 - 共 **32 个文件**：`src/*.ts`（无 `*.test.ts`）、`schemas/`、`permission-mode.defaults.json`、
   `defaults-history.json`、`README.md`、`LICENSE`、`CHANGELOG.md`、`CONTRIBUTING.md`、`SECURITY.md`、`package.json`；
 - 无 dotfile、无测试、无敏感文件；
-- 体积约 143 kB（33 文件）。
+- 体积约 143 kB（34 文件）。
 
 > 两个环境性失败（`blockablePath`@`src/paths.test.ts`、`bare-word symlink`@`src/index.test.ts`）是 NixOS 下
 > coreutils 路径/symlink 解析导致的既有问题，与代码无关（在 `main` 分支上同样存在）。发布说明里如实注明即可。

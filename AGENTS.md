@@ -45,9 +45,11 @@ pi -e ./src/index.ts   # 免安装冒烟测试
   沙箱档（`off/on/strict`，`alt+s`）、网络 allowlist（`alt+n`）。
 - 模式是**数据**：出厂五个模式定义在 `permission-mode.defaults.json`，
   用户可在 `permission-mode.json` 调整/新增。
-- 决策逻辑保持**纯、无 SDK**：`route.ts`（`routeAsk`：human/classifier 的唯一规则，穷举测试）、`resolve.ts`、`config-load.ts`、`paths.ts`、
-  `bash-enforce.ts`、`bash-parse.ts`、`heuristics.ts`、`safe-command.ts`、
-  `approvals.ts`、`network.ts`、`scratch.ts`、`awareness.ts`、`plan-render.ts`、
+- 决策逻辑保持**纯、无 SDK**：`action.ts`（审批事实归一化/模式名 helper）、`route.ts`
+  （`routeAsk`：human/classifier 的唯一规则，穷举测试）、`resolve.ts`、
+  `config-load.ts`、`paths.ts`、`bash-enforce.ts`、`bash-parse.ts`、
+  `heuristics.ts`、`safe-command.ts`、`approvals.ts`、`network.ts`、`scratch.ts`、
+  `awareness.ts`、`plan-render.ts`、
   `util.ts`。这些文件里的 SDK 导入必须**仅为 type**。
 - 关键模块：`config-load.ts` 分层加载（全局全权 / 项目只能收紧）；
   `classifier.ts`（auto 模式的 AI 判定）；`sandbox.ts`
