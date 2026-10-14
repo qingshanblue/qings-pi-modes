@@ -85,3 +85,26 @@ export function fileToolAllowedRoots(root: string, surface: Surface, outsideWrit
   if (surface !== "write" && surface !== "edit") return [];
   return outsideWriteRoots.map((raw) => canonicalPath(root, expandHome(raw)));
 }
+
+/** Titles stay within a few wrapped lines: the approval overlay renders them above the options. */
+export const TITLE_MAX_CHARS = 200;
+
+/** Flatten newlines and elide the MIDDLE of over-long text (head + tail stay visible). */
+export function compactTitle(text: string, max = TITLE_MAX_CHARS): string {
+  const flat = text.replace(/\r?\n/g, " ⏎ ").replace(/[ \t]{2,}/g, " ").trim();
+  if (flat.length <= max) return flat;
+  const omitted = flat.length - max;
+  const head = Math.max(0, Math.floor(max * 0.6));
+  const tail = Math.max(0, max - head);
+  return `${flat.slice(0, head)}…(+${omitted} chars)…${flat.slice(flat.length - tail)}`;
+}
+
+/** Human verb per file tool: the prompt should say what will happen to the path. */
+export const FILE_TOOL_VERB: Record<string, string> = {
+  read: "read of",
+  write: "write to",
+  edit: "edit of",
+  ls: "listing of",
+  grep: "search in",
+  find: "search in",
+};

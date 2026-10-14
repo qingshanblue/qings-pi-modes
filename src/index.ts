@@ -53,7 +53,7 @@ import { createBashTool, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { askWithSession, BlockedPaths, type ApprovalUI, type DenyOption, SessionApprovals } from "./approvals.ts";
-import { buildBashAskReview, buildFileToolAskReview, fileToolAllowedRoots, modePickerOptions, type AskReview, allModeNames } from "./action.ts";
+import { allModeNames, buildBashAskReview, buildFileToolAskReview, compactTitle, fileToolAllowedRoots, modePickerOptions, type AskReview } from "./action.ts";
 import { sandboxAwarenessPrompt } from "./awareness.ts";
 import { bashExecPlan, bashGate, isBenignOutsideRead } from "./bash-enforce.ts";
 import { analyzeBash, escapeTargetFromReason, escapingPaths, reviewBashScripts } from "./bash-parse.ts";
@@ -85,6 +85,7 @@ import {
 import type { PermState } from "./modes.ts";
 import { type NetAskResult, NetworkSession, isHostAllowed, normalizeDomain } from "./network.ts";
 import { blockablePath, canonicalPath, displayPath, isOutside, isProtectedWrite, normalizeToolPath, resolvePlanPath, sandboxAllowedRoots } from "./paths.ts";
+import { gateFileTool } from "./file-gate.ts";
 import { routeAsk } from "./route.ts";
 import {
   approvalMessage,
@@ -400,21 +401,7 @@ export default async function (pi: ExtensionAPI) {
     return false;
   };
 
-  // Approval prompts must show exactly what is being authorized — but the
-  // overlay renders the title ABOVE the options with no scrolling, so an
-  // over-long title pushes the options off screen. Keep titles within a few
-  // wrapped lines: flatten newlines and elide the MIDDLE of over-long text, so
-  // both the invoked head and the targeted tail stay visible. The full command
-  // is always visible in the transcript above the prompt anyway.
-  const TITLE_MAX_CHARS = 200;
-  const compactTitle = (text: string, max = TITLE_MAX_CHARS): string => {
-    const flat = text.replace(/\r?\n/g, " ⏎ ").replace(/[ \t]{2,}/g, " ").trim();
-    if (flat.length <= max) return flat;
-    const omitted = flat.length - max;
-    const head = Math.max(0, Math.floor(max * 0.6));
-    const tail = Math.max(0, max - head);
-    return `${flat.slice(0, head)}…(+${omitted} chars)…${flat.slice(flat.length - tail)}`;
-  };
+  // Approval-title helpers live in action.ts (compactTitle, FILE_TOOL_VERB).
   const bashTitle = (gateTitle: string, command: string): string =>
     `${compactTitle(gateTitle, 160)}\n$ ${compactTitle(command, 200)}`;
   const jsonTitle = (value: unknown, max = 240): string => {
@@ -425,15 +412,6 @@ export default async function (pi: ExtensionAPI) {
       text = String(value);
     }
     return compactTitle(text, max);
-  };
-  /** Human verb per file tool: the prompt should say what will happen to the path. */
-  const FILE_TOOL_VERB: Record<string, string> = {
-    read: "read of",
-    write: "write to",
-    edit: "edit of",
-    ls: "listing of",
-    grep: "search in",
-    find: "search in",
   };
 
   /** Prompt to allow an `ask`, honoring session grants (a target list requires
@@ -1501,43 +1479,27 @@ export default async function (pi: ExtensionAPI) {
       // Reads and ls/grep/find are unaffected.
       const writeRoots = fileToolAllowedRoots(root, surface, config.outsideWriteRoots);
       const outside = isOutside(root, path, [...bounds, ...writeRoots]);
-      // Sandbox `strict`: the boundary is hard for file tools too.
-      if (effectiveSandboxState(m) === "strict" && outside) {
-        return { block: true, reason: `Sandbox strict: outside-project access is blocked (${path})` };
+      const gate = gateFileTool({
+        mode: m,
+        surface,
+        toolName,
+        path,
+        outside,
+        strict: effectiveSandboxState(m) === "strict",
+      });
+      if (gate.kind === "block") {
+        if (gate.notice && ctx.hasUI) ctx.ui.notify(gate.notice, "warning");
+        return { block: true, reason: gate.reason };
       }
-      const action = decide(m, surface, path, { isOutside: outside });
-      if (action === "deny") {
-        // Friendly message for a Markdown-only write policy (e.g. Plan Mode).
-        const policy = m.permission[surface];
-        const markdownOnly =
-          (surface === "edit" || surface === "write") &&
-          typeof policy === "object" &&
-          policy !== null &&
-          policy["*"] === "deny";
-        if (markdownOnly) {
-          if (ctx.hasUI) ctx.ui.notify(`${m.label} allows editing Markdown files only: ${path}`, "warning");
-          return { block: true, reason: `${m.label} allows editing Markdown files only` };
-        }
-        return { block: true, reason: `Path "${path}" is blocked by ${m.label}` };
-      }
-      if (action === "ask") {
-        const verb = FILE_TOOL_VERB[toolName] ?? toolName;
-        const title = outside
-          ? `Outside project - allow ${verb} ${compactTitle(path, 120)}?`
-          : `Allow ${verb} ${compactTitle(path, 120)}?`;
-        const reason = outside ? "Access outside project blocked" : "blocked";
-        const denyAnd = outside ? denyAndBlock(ctx, [path]) : undefined;
+      if (gate.kind === "ask") {
         // File tools are NEVER sandboxed, so a write/edit outside the project is
         // by definition an unsandboxed mutation: it goes to the HUMAN, never to
-        // the classifier (same invariant as a bash escape). Outside reads and
-        // ls/grep/find stay classifier-gated (reads are best-effort by design).
-        const escalate = outside && (surface === "write" || surface === "edit");
+        // the classifier (buildFileToolAskReview sets neverAI for that case).
+        const denyAnd = outside ? denyAndBlock(ctx, [path]) : undefined;
         if (
-          !(await promptAllow(ctx, surface, path, title, undefined, denyAnd, {
-            ...buildFileToolAskReview({ tool: toolName, path, outside, surface }),
-          }))
+          !(await promptAllow(ctx, surface, path, gate.title, undefined, denyAnd, buildFileToolAskReview({ tool: toolName, path, outside, surface })))
         )
-          return { block: true, reason };
+          return { block: true, reason: gate.reason };
       }
       return undefined; // allow
     }
