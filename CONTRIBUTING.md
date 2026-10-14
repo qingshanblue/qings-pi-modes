@@ -52,7 +52,6 @@ Node 22, and **typecheck is blocking**.
 | `status.ts` | Footer indicator |
 | `classifier.ts` | AI safety classifier (prompt / verdict / denial state) for `classifier: true` modes |
 | `network.ts` | Live network session state (grants, denies, open toggle) for the proxy ask callback |
-| `remote-ask.ts` | Dual-surface approval prompts (terminal overlay + Telegram card) |
 | `awareness.ts` | Sandbox-boundary system-prompt section injected each turn |
 | `scratch.ts` | Session scratch directory (create / sweep / in-bounds) |
 | `plan-approval.ts` | One-step plan approval state (restore, message, hash) |

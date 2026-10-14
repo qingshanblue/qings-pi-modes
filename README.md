@@ -83,8 +83,8 @@ sudo apt install -y bubblewrap socat ripgrep
 
 1. 在任意项目启动 pi —— footer 显示模式指示，如 `Ask`；
 2. 切到 Edits（`alt+m` 直到 `Edits`，或 `/permission edits`）：
-   - 沙箱可用 → `Edits · sandbox:on …`；
-   - 否则 → `Edits · sandbox:unavailable` + 修复提示；
+   - 沙箱可用 → footer 显示 `Edits box:on`；
+   - 否则 → `Edits box:unavailable` + 修复提示；
 3. `/sandbox` 打印当前沙箱配置（或不可用的原因）。
 
 ---
@@ -148,9 +148,10 @@ Plan ready: plan/2026-09-24_feature.md
     Decline: keep refining in Plan Mode
 ```
 
-- **Accept** 切换到批准模式（默认 `edits`），并发送一条真实的用户消息：
-  `plan/… 中的计划已批准，立即实施。`——实施回合在 Edits 的系统提示下开始，
-  而不是还挂在 Plan 提示下。这条消息和手打的一样可见于记录。
+- **Accept** 切换到批准模式（默认 `edits`），并发送一条真实的用户消息（默认
+  `The plan in \`<path>\` is approved. Implement it now.`，可用 `plan.approveMessage`
+  定制）——实施回合在 Edits 的系统提示下开始，而不是还挂在 Plan 提示下。这条消息
+  和手打的一样可见于记录。
 - 批准只覆盖**你看到的内容**：计划文件在展示后被改动过，批准会被拒绝，
   直到模型重新 `show_plan`。
 - **Decline**（或 Esc）零成本：你留在 Plan 模式继续打磨。计划保持 pending，
@@ -168,8 +169,8 @@ pending 计划在 `/reload`、resume、分支导航后依然保留（`perm-plan`
 
 ```jsonc
 "plan": {
-  "approveMode": "edits",                                           // 任何已定义的模式
-  "approveMessage": "plan/`{path}` 中的计划已批准，立即实施。"  // {path} = 计划路径
+  "approveMode": "edits",   // 批准后切到的模式（默认 edits）
+  "approveMessage": "The plan in `{path}` is approved. Implement it now."  // {path} = 计划路径
 }
 ```
 
@@ -277,26 +278,6 @@ Tier 2   其余 ask（含只读越界读）        → 模型审批（命令仍�
 分类器配置**仅全局**——项目配置不能把审查者换成更弱的模型。要自定义 AI 模式，
 给任意模式加 `"classifier": true` 即可。
 
-## 双端审批（Telegram 镜像）
-
-装了 [@kdejaeger/pi-telegram-plus](https://www.npmjs.com/package/@kdejaeger/pi-telegram-plus)
-时，所有人工审批（`ask`/`edits`/`plan` 下的弹窗、网络白名单询问）**双面呈现**：
-
-```
-笔记本发起的运行 ──→ 终端 overlay + Telegram 按钮卡，两边竞速，先答的赢
-手机发起的运行   ──→ Telegram 按钮卡（现状不变）
-```
-
-- **终端侧**：自绘 overlay（↑/↓ 或数字键选择，Esc=拒绝）。
-- **Telegram 侧**：按钮卡（Allow once / Allow for session / Always / Deny），
-  先在终端答过会自动标注「✅ Answered in terminal」并撤下按钮；反之亦然。
-- 未连接 Telegram 或无 UI（headless）时自动降级，行为与之前完全一致。
-
-机制上复用 telegram-plus 的双面 `custom()` 桥（guardrails 兼容的 payload 协议），
-零 fork、零额外配置。两个已知限制（源于上游按钮集）：TG 侧暂无
-「Deny and block path」按钮（TG 的 Deny 即普通拒绝，不封锁路径）；
-「Allow forever（持久化到配置）」仅对路径类询问出现在 TG 卡上。
-
 ## 快捷键
 
 | 快捷键 | 作用 |
@@ -341,8 +322,9 @@ Tier 2   其余 ask（含只读越界读）        → 模型审批（命令仍�
    `denyRead` 的密钥路径读起来像不存在——无论命令写了什么。`alt+s` 的状态
    决定哪些模式跑在沙箱里（`off` = 不沙箱）；`strict` 额外在策略层拒绝一切越界访问。
 
-所以：策略说 `allow` 的 `bash` 仍在**沙箱内**运行；`ask` 弹窗后沙箱内执行——
-越界逃逸或你批准的提权则**脱离沙箱**执行（你亲自授权的）；`deny` 永不执行。
+所以：策略说 `allow` 的 `bash` 仍在**沙箱内**运行；`ask` 弹窗后沙箱内执行。
+会**脱离沙箱**的只有提权、写越界，以及沙箱 `off`/不可用时的命令——都需你亲自授权；
+只读越界仍在沙箱内、由策略/分类器把关；`deny` 永不执行。
 
 > 注意：只有模型的 `bash` 工具被 OS 沙箱约束。文件工具（`read`/`edit`/`write`/…）
 > 由策略引擎与路径检查管，不走 bubblewrap——Plan 的 Markdown-only 规则与保护路径
@@ -355,7 +337,7 @@ Tier 2   其余 ask（含只读越界读）        → 模型审批（命令仍�
 ——项目内安装而不是 `~/.npm`，allowlist 内的主机而不是死链——并且知道越界命令
 尽管发（你会被问到）。`strict` 态会额外注明"项目外读写被直接拦截"。沙箱降级时
 该段会说明并指向确认弹窗。用 `"injectSandboxInfo": false` 让某模式不注入；
-沙箱 `off` 的模式不注入。
+沙箱 `off` 的模式只注入一段简短的 scratch 目录说明。
 
 **工具隐藏。** 模式的 `hideTools` 列表会在模型推理**之前**把这些工具从可用集
 移除（走 active-tools allowlist），模型根本不会尝试。它只会**移除**：你自己关掉的
@@ -366,8 +348,8 @@ Tier 2   其余 ask（含只读越界读）        → 模型审批（命令仍�
 
 **技能与扩展工具。** 技能在 `/skill:<name>` 处按名门控（`skill` surface）；
 任何非内置/扩展工具（包括宿主添加的 MCP-as-tool）按工具名门控（`tool` surface）。
-在 **ask** 与 **plan** 模式，宿主新加的、还没有规则的工具/技能**首次使用时弹窗**——
-*Allow once / Allow this session / Allow forever / Deny*。"Allow forever" 把
+在**除 accept 外的模式**（`auto` 下该决定交给分类器），宿主新加的、还没有规则的
+工具/技能**首次使用时弹窗**——*Allow once / Allow this session / Allow forever / Deny*。"Allow forever" 把
 `<mode>.permission.<tool|skill>.<name>: "allow"` 持久化到全局配置，之后不再问。
 **Accept** 对所有工具/技能免问。（把某模式的 `tool`/`skill` 设为 `"allow"` 可退出
 首次询问，设为 `"deny"` 可整体禁止。）
@@ -545,8 +527,9 @@ Tier 2   其余 ask（含只读越界读）        → 模型审批（命令仍�
 本 fork 相对 [wynainfo/pi-permission-modes](https://github.com/wynainfo/pi-permission-modes)
 的变更（完整清单见 [CHANGELOG.md](CHANGELOG.md)）：
 
-- **模式重划为 CC 式五档**：`plan / ask / edits / auto / accept`（原 default/build/
-  automode/yolo 重命名并重定界；`edits` = accept-edits，`accept` 不再强制关沙箱）；
+- **模式重划为 CC 式五档**：`plan / ask / edits / auto / accept`（原 default/plan/build/
+  yolo 重映射：default→ask、build→edits、yolo→accept，plan 保留，新增 AI 档 auto；
+  `edits` = accept-edits，`accept` 不再强制关沙箱）；
 - **新增 `auto` 的 AI 分类器**（`safe-command.ts` 只读白名单 + 用户请求上下文 +
   fail-closed + 连续拒绝转人工）；
 - **沙箱解耦为独立三态**（`off/on/strict`，`alt+s`），profile 上提为顶层共享块；

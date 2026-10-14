@@ -63,13 +63,6 @@ Every section below `2.4.1` is the upstream history this fork starts from
   subcommands; no redirects or command substitution qualify). A known read-only
   command runs without a model call in `auto` and without a prompt in `ask` /
   `edits`.
-- **Dual-surface approvals.** With `@kdejaeger/pi-telegram-plus` installed and
-  connected, an approval renders as a terminal overlay *and* a Telegram button
-  card — the first answer wins and the other surface is retired. Built on public
-  extension APIs only (`pi.events` + `ctx.ui.custom()`), no fork of that plugin;
-  without it the prompt is a plain terminal overlay. Known upstream limits: no
-  "deny and block path" button on Telegram, and "allow forever" only appears for
-  path-shaped asks.
 - **Interactive command pickers.** `/permission`, `/network` and `/sandbox` with
   no argument open a picker (current state marked; Esc dismisses without
   changing anything). `/sandbox status` keeps the detailed report.
