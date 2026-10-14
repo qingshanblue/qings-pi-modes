@@ -229,14 +229,14 @@ Claude Code auto mode 的形态。它是唯一带 `"classifier": true` 的内置
 Tier 0   permission.allow 规则           → 放行
 Tier 1   只读命令白名单（内置）           → 放行（无重定向/命令替换才合格）
 Tier 2   其余 ask（含只读越界读）        → 模型审批（默认仍在沙箱内执行）
-旁路     会脱离沙箱的逃逸（提权 / 写越界 / 沙箱 off·不可用）→ **始终人工**（LLM 不得授予无沙箱执行；strict 沙箱态下直接 block）
+旁路     提权 / 沙箱开启时的逃逸 / 出项目文件工具写入 → **始终人工**；沙箱 off·不可用的其余 bash → Tier 2 AI 审查（`aiGatesUnsandboxed`，出厂 auto 默认开启；strict 沙箱态下直接 block）
 ```
 
 出厂 `auto` 的 **Tier 0** 已包含：`write`/`edit`、`web_search`、`skill`，以及
 bash 命令族 `npm run *` / `npm test*` / `git add *` / `git commit *` / `make *` /
 `python -m pytest*`——这些**完全不经过分类器**；其余 bash 与扩展工具首次使用走
-Tier 2。`aiGatesUnsandboxed` 是高级 opt-in：只有自定义模式开启它时，沙箱 off/不可用
-的可审查非提权动作才会交 AI。想调整就改全局配置里 `modes.auto.permission` 或自定义模式。
+Tier 2。沙箱 off/不可用时，可完整审查的非提权 bash 同样交 AI（出厂 `auto` 的 `aiGatesUnsandboxed: true`）。
+想调整就改全局配置里 `modes.auto.permission`；想恢复「无沙箱一律人工」，设 `aiGatesUnsandboxed: false`。
 
 
 - 分类器**进程内**运行，走 pi 的模型层（`ctx.modelRegistry`），复用你真实的
@@ -256,16 +256,13 @@ Tier 2。`aiGatesUnsandboxed` 是高级 opt-in：只有自定义模式开启它�
   用策略规则再放开（如 `"bash": { "sed -n*": "allow" }`）。
 - **fail-closed 默认**：分类器出错/超时/返回不可解析 → **该操作被拦**。全局配置
   `"classifier": { "failClosed": false }` 可改为降级人工弹窗。
-- **默认逃逸永不交给分类器**：提权、写越界，以及任何会以「无沙箱」方式执行的 ask（含沙箱 `off`/
-  不可用），一律走人工确认（headless 下即拒绝）——最危险的授权不给 LLM。
-- **高级 opt-in：`aiGatesUnsandboxed`**：自定义 classifier 模式可显式允许 AI 审查
-  沙箱 off/不可用时的**可完整审查、非提权**动作；脚本引用其它文件、内容截断、
-  不透明替换等无法完整审查的 payload 仍转人工；提权、enforcing 沙箱的逃逸、
-  保护路径以及文件工具项目外写入仍不交 AI。该模式是“我信任这台机器”的声明，
-  **不是安全边界**，默认关闭。直接执行的项目内脚本（上限 8 KiB）会连同内容进入审查；
+- **沙箱 off/不可用时的非提权 bash 交 AI**（`aiGatesUnsandboxed`，出厂 auto 默认 `true`）：
+  可完整审查的动作由分类器裁决；脚本引用其它文件、内容截断、不透明替换等无法完整审查的
+  payload 转人工。**始终人工**：提权、enforcing 沙箱的逃逸、保护路径（硬拦）、文件工具项目外写入。
+  这是“我信任这台机器”的取舍，**不是安全边界**。直接执行的项目内脚本（上限 8 KiB）会连同内容进入审查；
   项目外脚本不会读入模型上下文，直接回退人工。
 
-  配置示意（只建议给你明确自定义的 classifier 模式）：
+  自定义模式如需同样行为，显式设置：
   ```jsonc
   "trusted-auto": {
     "classifier": true,

@@ -47,19 +47,19 @@ you can rely on it appropriately.
   filter rather than containment. The OS sandbox state and the hard-deny paths
   remain the boundaries. `classifier.failClosed` defaults to `true`, so an
   error, timeout, or unparsable verdict blocks the action instead of falling
-  back to a prompt nobody may be present to answer. By default, an ask that
-  would run the command OUTSIDE the sandbox — privilege escalation, a write
-  escape, or any ask while the sandbox is off/unavailable — is never handed to
-  the classifier: it always goes to the human prompt (denied in a headless
-  session). A mode may explicitly opt in with `aiGatesUnsandboxed:true`: then
-  sandbox-off/unavailable actions that are fully inspectable and non-privileged
-  may be classifier-gated, but privilege escalation, escapes from an enforcing
-  sandbox, uninspectable/truncated/script-referencing payloads, protected paths,
-  and file-tool writes/edits outside the project remain human-only or hard-
-  blocked. Direct project-local scripts are bounded to 8 KiB in the review
-  context; outside scripts are never read into that context, and common source/
-  eval/substitution/nested-shell references fall back to the human. This opt-in
-  is a trust declaration, not containment. A READ-ONLY
+  back to a prompt nobody may be present to answer. An ask that would run the
+  command OUTSIDE the sandbox is judged as follows (factory `auto` sets
+  `aiGatesUnsandboxed: true`; custom modes default to false, which keeps every
+  unsandboxed ask human-only): a privilege escalation, an escape from an
+  enforcing sandbox, and a file-tool write/edit outside the project always go to
+  the human (denied in a headless session). Any other sandbox-off/unavailable
+  bash ask goes to the classifier only when fully inspectable; uninspectable,
+  truncated, or script-referencing payloads, and protected paths, still go to
+  the human or are hard-blocked. Direct project-local scripts are bounded to
+  8 KiB in the review context; outside scripts are never read into that
+  context, and common source/eval/substitution/nested-shell references fall back
+  to the human. This is a trust declaration for an operator who trusts the
+  machine, not containment. A READ-ONLY
   out-of-project access is not such an ask for bash: the sandbox already permits
   outside reads, so it stays sandboxed and is gated by the classifier. File-tool
   outside reads / `ls` / `grep` / `find` remain classifier-gated as a

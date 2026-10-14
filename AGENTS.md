@@ -83,10 +83,10 @@ pi -e ./src/index.ts   # 免安装冒烟测试
 
 ## 安全约定（不可让步）
 
-- **默认逃逸永远不交给 AI 分类器**：任何会在沙箱外执行的 ask（提权、写越界、
-  沙箱 `off`/不可用）一律走人工提示——headless 下即拒绝。自定义模式可显式
-  设置 `aiGatesUnsandboxed:true`，把沙箱 off/不可用时可完整审查的非提权动作交给
-  AI；提权、enforcing 沙箱逃逸、不可审查 payload、保护路径和文件工具写越界仍人工/硬拦。
+- **逃逸判定**：提权、enforcing 沙箱逃逸、文件工具项目外写入永远人工（headless 即拒）。
+  出厂 `auto` 设 `aiGatesUnsandboxed: true`：沙箱 off/不可用时可完整审查的非提权 bash
+  交 AI；不可审查 payload、保护路径仍人工/硬拦。自定义模式默认 `false`，即无沙箱一律人工。
+  这是用户明确拍板的行为（2026-10-14），改动它需用户确认并同步 SECURITY/README。
   （只读越界读不属于默认 escape：它仍在沙箱内，可交分类器。）
 - Tier-1 只读白名单（`safe-command.ts`）刻意保守：无重定向、无命令替换、
   无写入/执行类 flag（`find -execdir`、`sort -o`、`uniq in out`、`git --output=`），

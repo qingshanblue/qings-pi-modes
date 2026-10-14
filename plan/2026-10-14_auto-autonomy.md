@@ -8,7 +8,7 @@
 
 提升自主性 = **移除"审查层"**，而不是移除"执行边界"。以下硬边界一条不动：
 
-1. **逃逸永不交分类器**：提权、写越界、沙箱 `off`/不可用时的 bash → 人工（headless 即拒）。
+1. **逃逸判定（已更新）**：提权、enforcing 沙箱逃逸、文件工具项目外写入 → 人工；沙箱 `off`/不可用的其余可审查 bash → AI（`aiGatesUnsandboxed` 出厂默认 true）。
 2. **文件工具的项目外写入** → 人工（文件工具从不受沙箱约束，写出去就是真实写）。
 3. **保护路径硬拦**（`.git/`、`.env*`、dotfiles、`.claude/{commands,agents}/`…），auto 无 `bypassProtectedPaths`。
 4. **`denyRead` 秘密在内核层遮蔽**（bash 侧）。
@@ -147,7 +147,7 @@
 - T0 已提升为**出厂默认**（1.2.0）：auto 的 `write/edit/web_search/skill` 放行；常见构建/测试命令族进入 bash Tier 0；tool 保持 ask。
 - T1 网络按合理范围进入出厂默认：GitHub CDN + NixOS hosts；`allowWrite` 未扩容（避免供应链/全局目录写入风险）；`askOnBlockedHost` 保持人工询问。
 - T2-1（分类器会话记忆）不做：一次模型放行不泛化为整族免审。
-- **新增 opt-in `aiGatesUnsandboxed`**（默认 false）：自定义 classifier 模式可将沙箱 off/不可用时完全可审查、非提权动作交给 AI；提权、enforcing 沙箱逃逸、不可审查 payload、保护路径和文件工具写越界仍人工/硬拦；脚本内容（有界）进入审查上下文。
+- **`aiGatesUnsandboxed`**（出厂 auto 默认 true，自定义模式默认 false）：自定义 classifier 模式可将沙箱 off/不可用时完全可审查、非提权动作交给 AI；提权、enforcing 沙箱逃逸、不可审查 payload、保护路径和文件工具写越界仍人工/硬拦；脚本内容（有界）进入审查上下文。
 - 所有 opt-in 的无沙箱 AI 闸门都是“信任这台机器”的声明，不是安全边界。
 
 ## 7. 后续可选决策

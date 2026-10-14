@@ -141,7 +141,7 @@
         "hideTools": { "type": "array", "items": { "type": "string" }, "description": "Tools hidden from the model in this mode." },
         "bypassProtectedPaths": { "type": "boolean", "description": "Skip the .git/.env/dotfile write backstop (only trusted modes)." },
         "classifier": { "type": "boolean", "description": "Route this mode's `ask` decisions through the AI safety classifier instead of the human prompt (see the top-level `classifier` block)." },
-        "aiGatesUnsandboxed": { "type": "boolean", "description": "Opt-in: let the AI classifier gate bash asks that will run UNSANDBOXED (sandbox off/unavailable) instead of escalating to the human. Only meaningful with `classifier: true`. Privilege escalation, sandbox-on escapes, and payloads the reviewer cannot fully inspect always go to the human. Default false. Global config only." }
+        "aiGatesUnsandboxed": { "type": "boolean", "description": "Let the AI classifier gate bash asks that will run UNSANDBOXED (sandbox off/unavailable) instead of escalating to the human. Factory `auto` sets true; set false to restore human-only unsandboxed asks. Only meaningful with `classifier: true`. Privilege escalation, sandbox-on escapes, and payloads the reviewer cannot fully inspect always go to the human. Default false for custom modes. Global config only." }
       }
     }
   }

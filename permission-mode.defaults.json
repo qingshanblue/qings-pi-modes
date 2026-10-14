@@ -115,6 +115,7 @@
       "label": "Auto",
       "color": "warning",
       "classifier": true,
+      "aiGatesUnsandboxed": true,
       "systemPrompt": "Auto mode is active: file writes/edits, common build/test commands, web search and skills run automatically; other bash commands are reviewed by an AI safety classifier, and anything that would escape the sandbox (privilege escalation, writes outside the project) is escalated to the human. Keep actions scoped to the project, reversible, and aligned with the request; secret access, privilege escalation, and data exfiltration are blocked.",
       "permission": {
         "path": {

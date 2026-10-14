@@ -151,6 +151,8 @@ interface AskReview {
    * inspectable, non-privileged, non-sandbox-escape case to the classifier.
    */
   escalateToHuman?: boolean;
+  /** Outside file-tool write/edit: never AI, even with aiGatesUnsandboxed (file tools have no sandbox containment). */
+  neverAI?: boolean;
 }
 
 /** Built-in file tools whose `input.path` is gated against the matching surface. */
@@ -357,12 +359,12 @@ export default async function (pi: ExtensionAPI) {
       );
     const cfg = normalizeClassifierConfig(config.classifier);
     if (!cfg.enabled) return humanPrompt();
-    // Default: anything that would run outside the sandbox is human-only. An
-    // explicit mode-level `aiGatesUnsandboxed` opt-in may delegate only the
-    // fully inspectable, non-privileged, non-sandbox-escape subset to the AI.
-    // Privilege and escapes from an enforcing sandbox remain human-only.
+    // Anything that would run outside the sandbox goes to the AI only when the
+    // mode sets `aiGatesUnsandboxed` (factory auto: true) AND the request is a
+    // fully inspectable, non-privileged, non-sandbox-escape bash ask. Privilege,
+    // escapes from an enforcing sandbox, and outside file-tool writes stay human.
     if (review.escalateToHuman) {
-      if (review.privilege || review.sandboxEscape || !currentMode().aiGatesUnsandboxed || review.inspectable === false) {
+      if (review.privilege || review.sandboxEscape || review.neverAI || !currentMode().aiGatesUnsandboxed || review.inspectable === false) {
         return humanPrompt();
       }
     }
@@ -1552,6 +1554,7 @@ export default async function (pi: ExtensionAPI) {
             input: { path },
             isOutside: outside,
             escalateToHuman: escalate,
+            neverAI: escalate,
             inspectable: true,
             unsandboxed: outside && (surface === "write" || surface === "edit"),
           }))

@@ -27,12 +27,13 @@ to match.
   - `modes.auto.systemPrompt` rewritten to describe the new division of labor.
 - **Wider default network allowlist**: `*.githubusercontent.com` (GitHub's
   release/objects CDN) and `cache.nixos.org` / `nixos.org` (NixOS hosts).
-- **Opt-in `aiGatesUnsandboxed` mode flag**: a custom classifier mode may let
-  the AI gate fully inspectable, non-privileged actions while the sandbox is
-  off/unavailable. Privilege escalation, escapes from an enforcing sandbox,
-  opaque/truncated/script-referencing payloads, protected paths, and
-  file-tool writes/edits outside the project remain human-only or hard-blocked;
-  the flag is off by default.
+- **Sandbox-off bash goes to the AI by default** (`aiGatesUnsandboxed`, set to
+  `true` in the factory `auto` mode): when the sandbox is off/unavailable, a
+  fully inspectable, non-privileged bash ask is decided by the classifier.
+  Privilege escalation, escapes from an enforcing sandbox, outside file-tool
+  writes/edits, opaque/truncated/script-referencing payloads, and protected paths
+  stay human-only or hard-blocked. Custom modes can set `false` to keep every
+  unsandboxed ask human-only.
 
 ### Security
 - **File-tool writes/edits outside the project are no longer judged by the AI

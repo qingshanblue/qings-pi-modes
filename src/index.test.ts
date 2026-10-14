@@ -1363,23 +1363,33 @@ test("automode: an allowed ask runs without prompting; status shows the classifi
   }
 });
 
-test("automode: an escape the sandbox cannot bound is never approved by the classifier", { skip }, async () => {
-  // The classifier WOULD allow these; the prompt must still reach the human
-  // because approving an escape runs the command outside the sandbox. When the
-  // sandbox is unavailable (--no-sandbox here) even a READ-ONLY outside read is
-  // not benign — `isBenignOutsideRead` requires an enforcing sandbox — so it is
-  // still the human's call, not the AI's.
+test("automode: privilege escalation is never approved by the classifier", { skip }, async () => {
   const registry = classifierRegistry(allowReply);
   const h = await setup({ permFlag: "auto", modelRegistry: registry, model: { id: "m", provider: "p" } });
   try {
-    for (const command of ["cat /etc/hostname", "sudo rm -rf /", "echo hi > /etc/x"]) {
-      h.ctx.answers.push("Deny");
-      const res = await h.call("bash", { command });
-      assert.equal(res?.block, true, command);
-      assert.match(h.ctx.prompts.at(-1)?.title ?? "", /outside project|unsandboxed|privilege/i);
-    }
-    assert.equal(registry.calls.length, 0, "the classifier must not see an unbounded escape");
-    assert.equal(h.ctx.prompts.length, 3);
+    h.ctx.answers.push("Deny");
+    const res = await h.call("bash", { command: "sudo rm -rf /" });
+    assert.equal(res?.block, true);
+    assert.match(h.ctx.prompts.at(-1)?.title ?? "", /privilege/i);
+    assert.equal(registry.calls.length, 0, "the classifier must not see a privilege escalation");
+  } finally {
+    h.cleanup();
+  }
+});
+
+test("automode: aiGatesUnsandboxed:false restores human-only unsandboxed asks", { skip }, async () => {
+  const registry = classifierRegistry(allowReply);
+  const h = await setup({ permFlag: "auto", modelRegistry: registry, model: { id: "m", provider: "p" } });
+  try {
+    const dir = path.join(h.agentDir, "permission-mode");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "permission-mode.json"), JSON.stringify({ modes: { auto: { aiGatesUnsandboxed: false } } }));
+    await h.pi.emit("session_start", {}, h.ctx);
+    h.ctx.answers.push("Deny");
+    const res = await h.call("bash", { command: "cat /etc/hostname" });
+    assert.equal(res?.block, true);
+    assert.match(h.ctx.prompts.at(-1)?.title ?? "", /outside project|unsandboxed|sandbox unavailable/i);
+    assert.equal(registry.calls.length, 0, "opt-out keeps unsandboxed asks away from the classifier");
   } finally {
     h.cleanup();
   }
@@ -1696,8 +1706,6 @@ test("automode: a file-tool write outside the project never reaches the classifi
   try {
     h.ctx.answers.push("Deny");
     const res = await h.call("write", { path: outsidePath, content: "nope" });
-    // eslint-disable-next-line no-console
-    console.error("DBG", JSON.stringify({ res, calls: registry.calls.length, prompts: h.ctx.prompts, root: h.root, outsidePath }));
     assert.equal(res?.block, true);
     assert.equal(registry.calls.length, 0, "the classifier must not see an outside write");
     assert.match(h.ctx.prompts.at(-1)?.title ?? "", /Outside project/);
@@ -1713,22 +1721,20 @@ test("automode: a file-tool write outside the project never reaches the classifi
   }
 });
 
-test("automode: whitelisted bash families never reach the classifier", { skip }, async () => {
+test("automode: degraded (sandbox-unavailable) bash is AI-reviewed by default", { skip }, async () => {
   const registry = classifierRegistry(allowReply);
   const h = await setup({ permFlag: "auto", modelRegistry: registry, model: { id: "m", provider: "p" } });
   try {
-    // The harness runs --no-sandbox, so EVERY in-project bash degrades to the
-    // "sandbox unavailable" human prompt (bashGate checks readiness before the
-    // policy action — never silently unprotected). What this proves: the
-    // Tier-0-allowed families are decided WITHOUT the classifier.
+    // The harness runs --no-sandbox, so these bash calls are degraded to the
+    // unsandboxed path. With aiGatesUnsandboxed (factory auto) that path is
+    // reviewed by the AI — never silently run, never a human prompt for an
+    // inspectable command.
     for (const command of ["npm run build", "git add -n .", "make --version"]) {
-      h.ctx.answers.push("Deny");
       const res = await h.call("bash", { command });
-      assert.equal(res?.block, true, command);
-      assert.match(h.ctx.prompts.at(-1)?.title ?? "", /sandbox unavailable/, command);
+      assert.equal(res, undefined, command);
     }
-    assert.equal(h.ctx.prompts.length, 3);
-    assert.equal(registry.calls.length, 0, "Tier-0 bash allows must not reach the classifier");
+    assert.equal(h.ctx.prompts.length, 0);
+    assert.equal(registry.calls.length, 3);
     // The silent execution of these families (sandbox ready) is covered by
     // parity.test.ts; the live behaviour by the user's box:on session.
   } finally {
