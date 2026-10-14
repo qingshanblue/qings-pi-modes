@@ -1343,9 +1343,9 @@ test("automode: an allowed ask runs without prompting; status shows the classifi
   const h = await setup({ permFlag: "auto", modelRegistry: registry, model: { id: "m", provider: "p" } });
   try {
     assert.match(h.ctx.status, /^Auto /);
-    // The harness runs --no-sandbox, so auto's classifier is degraded (it cannot
-    // gate unsandboxed bash) and the footer says so instead of the model chip.
-    assert.match(h.ctx.status, /AI:no-box/);
+    // The classifier chip stays even though the harness runs --no-sandbox: the AI
+    // still reviews file / extension asks; only unsandboxed bash escalates.
+    assert.match(h.ctx.status, /AI:inherit/);
     const res = await h.call("write", { path: "src/app.ts", content: "x" });
     assert.equal(res, undefined); // allowed, not blocked
     assert.equal(h.ctx.prompts.length, 0); // never asked the human

@@ -10,10 +10,10 @@
  *   box:on | strict | off | unavailable   (color-coded per state)
  *   net:limit | free     (the domain-allowlist toggle — alt+n; only while the
  *                         sandbox is enforcing; the NETWORK itself is never off)
- *   AI:inherit | AI:<model>   (only in classifier modes)
- *   AI:no-box                 (classifier mode but the sandbox is off/unavailable:
- *                              the AI cannot gate unsandboxed bash, so those asks
- *                              come to you)
+ *   AI:inherit | AI:<model>   (only in classifier modes; stays even when the
+ *                              sandbox is off — the AI still reviews file /
+ *                              extension / web asks; only unsandboxed bash is
+ *                              escalated to the human)
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -37,9 +37,10 @@ export function updateStatus(
   const enforcing = sb.enabled && sandbox.ready;
   const netEnabled = enforcing && networkFiltered(sb);
   const degraded = sb.enabled && !!sandbox.warn && !sandbox.disabled;
-  // A classifier mode whose sandbox is not enforcing: the AI can still review
-  // file/extension tools, but every bash ask will run unsandboxed once approved,
-  // so it is escalated to the human. Surface that instead of the model chip.
+  // A classifier mode whose sandbox is not enforcing: the AI still reviews
+  // file / extension / web asks, but every bash ask would run unsandboxed once
+  // approved, so those escalate to the human. Keep the AI chip (the reviewer IS
+  // working); flag the bash caveat only in the verbose form.
   const aiDegraded = !!mode.classifier && !enforcing;
 
   if (compact) {
@@ -54,10 +55,7 @@ export function updateStatus(
     let status = t.fg(mode.color, mode.label);
     status += sep + t.fg(sbColor, `box:${sbx}`);
     if (netEnabled) status += sep + (networkOpen ? t.fg("success", "net:free") : t.fg("warning", "net:limit"));
-    if (mode.classifier) {
-      if (aiDegraded) status += sep + t.fg("error", "AI:no-box");
-      else if (classifierLabel) status += sep + classifierLabel;
-    }
+    if (mode.classifier && classifierLabel) status += sep + classifierLabel;
     ctx.ui.setStatus("perm", status);
     return;
   }
@@ -74,8 +72,8 @@ export function updateStatus(
     status += "  " + t.fg("dim", "Network: open");
   }
   if (mode.classifier) {
-    if (aiDegraded) status += "  " + t.fg("error", "AI: without a sandbox, bash asks go to you");
-    else if (classifierLabel) status += "  " + t.fg(mode.color, classifierLabel);
+    if (classifierLabel) status += "  " + t.fg(mode.color, classifierLabel);
+    if (aiDegraded) status += "  " + t.fg("error", "(no sandbox: bash asks go to you; file/extension asks stay AI-reviewed)");
   }
   ctx.ui.setStatus("perm", status);
 }

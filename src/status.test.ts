@@ -71,18 +71,20 @@ test("updateStatus: the classifier AI token only appears in classifier modes", (
   assert.ok(!/AI/.test(c.status), "no AI token outside classifier modes");
 });
 
-test("updateStatus: a classifier mode without an enforcing sandbox shows AI:no-box", () => {
+test("updateStatus: the classifier chip stays when the sandbox is not enforcing", () => {
   const sb = { enabled: true, writable: true };
-  // sandbox off
+  // sandbox off: the AI chip is unchanged — box:off already explains it, and only
+  // bash degrades; file / extension / web asks are still AI-reviewed.
   let c = ctx();
   updateStatus(c as never, { ...mode({ enabled: false, writable: true }), classifier: true }, { ready: true, warn: undefined, disabled: false }, false, "AI:inherit", true, "off");
-  assert.equal(c.status, "Build box:off AI:no-box");
+  assert.equal(c.status, "Build box:off AI:inherit");
   // sandbox on but unavailable
   c = ctx();
   updateStatus(c as never, { ...mode(sb), classifier: true }, { ready: false, warn: "nope", disabled: false }, false, "AI:inherit", true, "on");
-  assert.equal(c.status, "Build box:unavailable AI:no-box");
-  // verbose form explains why
+  assert.equal(c.status, "Build box:unavailable AI:inherit");
+  // verbose keeps the chip and adds the accurate bash caveat
   c = ctx();
   updateStatus(c as never, { ...mode(sb), classifier: true }, { ready: false, warn: "nope", disabled: false }, false, "AI:inherit", false, "on");
-  assert.match(c.status, /AI: without a sandbox, bash asks go to you/);
+  assert.match(c.status, /AI:inherit/);
+  assert.match(c.status, /bash asks go to you/);
 });

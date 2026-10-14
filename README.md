@@ -259,7 +259,8 @@ Tier 2   其余 ask（含只读越界读）        → 模型审批（命令仍�
   真正的边界是沙箱态（`alt+s`）与硬拦规则（详见 SECURITY.md）。
 - 连续拒绝达 `classifier.maxConsecutiveDenials`（默认 5）→ 转人工一次，避免卡死；拒绝**按
   surface 分别计数**（一次写拒绝不会把无关的 bash 命令推过阈值），一次 allow 清零该 surface。
-- footer 显示 `AI:current-model`（或 `AI:<模型>`）；分类器模式但沙箱未生效时显示 **`AI:no-box`**——AI 无法为无沙箱 bash 把关，这类 `ask` 会转人工。
+- footer 显示 `AI:current-model`（或 `AI:<模型>`）。分类器对文件/扩展/网络等 `ask` **照常工作**；
+  **只有会脱离沙箱的 `bash`** 在沙箱未生效（footer `box:off`/`box:unavailable`）时转人工。
 
 全局 `permission-mode.json` 中的分类器配置：
 

@@ -116,6 +116,6 @@
 - **P2** — `maxConsecutiveDenials` 默认 `3 → 5`；`DenialState` 改为按 surface 计数，`recordDenial/recordSuccess/shouldFallbackToPrompting` 带 `surface`。
 - **P3** — SYSTEM_PROMPT 增加「常规开发步骤倾向放行」；`ClassifierSubject.inBounds` + 提示词 `in-bounds roots` 行。
 - **P4** — 出厂 `network.allowedDomains` 增加 crates.io / Go / RubyGems / files.pythonhosted.org / Maven；`defaults-history.json` 追加改前默认值（`1.0.0..1.0.0`）；`configLeaves` 扩展到顶层 `sandbox`/`network`（否则网络默认变更对审计不可见）；CHANGELOG 新建 `1.1.0` 段。
-- **P5** — 修正 `autoDecide` 注释；`status.ts` 在分类器模式且沙箱未生效时显示 `AI:no-box`（verbose：`AI: without a sandbox, bash asks go to you`）。
+- **P5** — 修正 `autoDecide` 注释；分类器 chip **始终显示**（`AI:<model>`）——分类器对文件/扩展/网络 ask 照常工作，沙箱未生效时只有会脱离沙箱的 `bash` 转人工（verbose 额外注明）。
 
-**测试**：`npm test` 288 项 / 286 通过 / 2 个环境性失败（`blockablePath`@`paths.test.ts`、`bare-word symlink`@`index.test.ts:1305`——均在基线 `git stash` 下同样失败）；`npm run typecheck` 干净。新增测试：`isBenignOutsideRead` 全矩阵、按 surface 计数、`inBounds` 提示词、顶层审计 leaf、`AI:no-box`，以及 auto 下 unbounded escape（只读/提权/写越界）仍走人工。
+**测试**：`npm test` 288 项 / 286 通过 / 2 个环境性失败（`blockablePath`@`paths.test.ts`、`bare-word symlink`@`index.test.ts:1305`——均在基线 `git stash` 下同样失败）；`npm run typecheck` 干净。新增测试：`isBenignOutsideRead` 全矩阵、按 surface 计数、`inBounds` 提示词、顶层审计 leaf、状态 chip 保持，以及 auto 下 unbounded escape（只读/提权/写越界）仍走人工。
