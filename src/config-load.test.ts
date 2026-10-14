@@ -55,7 +55,7 @@ test("loadStockDefaults: reads the shipped JSON → five modes, correct defaults
   const c = loadStockDefaults((m) => errors.push(m));
   assert.equal(errors.length, 0, errors.join("; ")); // stock file present & valid
   assert.equal(c.defaultMode, "ask");
-  assert.deepEqual(c.cycleOrder, ["plan", "ask", "edits", "auto", "accept"]);
+  assert.deepEqual(c.cycleOrder, ["plan", "ask", "auto", "accept"]);
   assert.deepEqual(Object.keys(c.modes).sort(), ["accept", "ask", "auto", "edits", "plan"]);
   assert.ok(stockDefaultsFile().endsWith("permission-mode.defaults.json"));
 });
@@ -537,4 +537,17 @@ test("sandbox: top-level profile merges; per-mode sandboxPin is validated (bad o
   assert.equal(c.modes.edits.sandboxPin, undefined); // invalid value dropped
   assert.ok(s.errors.some((e) => /sandboxPin in global mode "edits"/.test(e)));
   s.cleanup();
+});
+
+test("outsideWriteRoots: global only; a project cannot grant write access outside its root", () => {
+  const g = sandbox({ global: { outsideWriteRoots: ["/etc/pm-roots"] } });
+  const cg = loadModeConfig(g.cwd, g.agentDir, (m) => g.errors.push(m));
+  assert.deepEqual(cg.outsideWriteRoots, ["/etc/pm-roots"]);
+  g.cleanup();
+
+  const p = sandbox({ project: { outsideWriteRoots: ["/etc"] } });
+  const cp = loadModeConfig(p.cwd, p.agentDir, (m) => p.errors.push(m));
+  assert.equal(cp.outsideWriteRoots, undefined);
+  assert.ok(p.errors.some((e) => /cannot set outsideWriteRoots/.test(e)));
+  p.cleanup();
 });

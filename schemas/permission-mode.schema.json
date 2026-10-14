@@ -42,6 +42,11 @@
       "enum": ["compact", "verbose"],
       "description": "Footer status style: `compact` (default, a short token line such as \"Auto box:on net:limit AI:inherit\") or `verbose` (the spelled-out form)."
     },
+    "outsideWriteRoots": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Extra directories where file-tool write/edit is allowed without a prompt (static, human-chosen; the AI is not consulted). Global config only. Protected paths stay blocked."
+    },
     "modes": {
       "type": "object",
       "description": "Map of mode name → mode definition.",

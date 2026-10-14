@@ -15,6 +15,13 @@ of their values is now outdated; the shipped `auto` system prompt was updated
 to match.
 
 ### Changed
+- **Mode cycle is now `plan → ask → auto → accept`.** `edits` is still a
+  built-in mode, selectable with `/permission edits`, but it is no longer in
+  `alt+m`'s cycle and the `/permission` picker lists only the cycle.
+- **Routing of unsandboxed asks is one pure function** (`src/route.ts`,
+  exhaustively tested). The rule is unchanged: privilege, sandbox escapes and
+  outside file-tool writes are human-only; sandbox-off bash is classifier-
+  reviewed only when inspectable and the mode opts in.
 - **Factory `auto` defaults** (`permission-mode.defaults.json`, via
   `defaults-history.json`):
   - `permission.write` / `permission.edit`: `ask` → **`allow`** (protected
@@ -34,6 +41,12 @@ to match.
   writes/edits, opaque/truncated/script-referencing payloads, and protected paths
   stay human-only or hard-blocked. Custom modes can set `false` to keep every
   unsandboxed ask human-only.
+
+### Added
+- **`outsideWriteRoots`** (global config): directories where file-tool
+  `write`/`edit` is allowed without a prompt. A static human-chosen grant; the
+  AI is not consulted, protected paths stay blocked, and bash is still bounded
+  by the sandbox's `allowWrite`. A project config cannot set it.
 
 ### Security
 - **File-tool writes/edits outside the project are no longer judged by the AI

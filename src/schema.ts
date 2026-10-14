@@ -208,6 +208,13 @@ export interface PermissionModeConfig {
   classifier?: Partial<ClassifierConfig>;
   /** Footer status verbosity: "compact" (default) or "verbose". Global config only. */
   statusFormat?: "compact" | "verbose";
+  /**
+   * Extra directories where file-tool write/edit is allowed without a prompt
+   * (static, human-chosen; the AI is not consulted). Global config only: a
+   * project cannot grant itself write access outside its root. Protected paths
+   * stay blocked, and bash is still bounded by the OS sandbox allowWrite.
+   */
+  outsideWriteRoots?: string[];
 }
 
 /** Sentinel a mode's `systemPrompt` can use to request the Plan-mode prompt. */

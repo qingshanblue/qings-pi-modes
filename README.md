@@ -82,7 +82,7 @@ sudo apt install -y bubblewrap socat ripgrep
 ### 验证
 
 1. 在任意项目启动 pi —— footer 显示模式指示，如 `Ask`；
-2. 切到 Edits（`alt+m` 直到 `Edits`，或 `/permission edits`）：
+2. 切到 Auto（`alt+m` 直到 `Auto`，或 `/permission auto`）：
    - 沙箱可用 → footer 显示 `Edits box:on`；
    - 否则 → `Edits box:unavailable` + 修复提示；
 3. `/sandbox` 打印当前沙箱配置（或不可用的原因）。
@@ -104,7 +104,8 @@ sudo apt install -y bubblewrap socat ripgrep
 | **auto** `▶` | 项目内**读/写/改全自动**；白名单 bash（`npm run/test`、`git add/commit`、`make`、`pytest`）全自动；其余 bash、项目外读、扩展工具交给 **AI 安全分类器**（见 [AI auto 模式](#ai-auto-模式)）；会脱离沙箱的逃逸（写越界 / 提权）仍走人工。 |
 | **accept** `⚡` | **从不询问**（自动接受所有策略决定）——但仍**受沙箱边界约束**：`alt+m` 决定它能触达什么。无保护路径兜底。 |
 
-- 循环顺序 = 权限从低到高：`plan → ask → edits → auto → accept`。
+- 循环顺序 = `plan → ask → auto → accept`（`alt+m`）。`edits` 不在循环中，用 `/permission edits` 直接切换；
+  `/permission` 的用法提示列出全部模式。
 - 模式是**数据**：可在 `permission-mode.json` 里调整或新增（见[配置](#配置)）。
 
 ### ② 沙箱边界（三态，只管「工作目录外」）
@@ -302,7 +303,7 @@ Tier 2。沙箱 off/不可用时，可完整审查的非提权 bash 同样交 AI
 
 | 快捷键 | 作用 |
 |---|---|
-| `alt+m` | 循环审批模式：`plan → ask → edits → auto → accept` |
+| `alt+m` | 循环审批模式：`plan → ask → auto → accept` |
 | `alt+s` | 循环沙箱态：`off → on → strict` |
 | `alt+n` | 切换网络过滤：`filtered ⇄ open` |
 
@@ -407,7 +408,8 @@ Tier 2。沙箱 off/不可用时，可完整审查的非提权 bash 同样交 AI
 {
   "$schema": "https://raw.githubusercontent.com/qingshanblue/qings-pi-modes/main/schemas/permission-mode.schema.json",
   "defaultMode": "ask",
-  "cycleOrder": ["plan", "ask", "edits", "auto", "accept"],
+  "cycleOrder": ["plan", "ask", "auto", "accept"],
+  "outsideWriteRoots": ["~/notes"],    // 文件工具可直接写入的项目外目录（仅全局；受保护路径仍拦）
   "sandbox": {                         // 共享 OS 沙箱 profile（一处定义；仅全局）
     "allowWrite": [".", "/tmp/pi"],    // alt+s 的三态围绕这份 profile 切换启停
     "denyRead": ["~/.ssh", "~/.aws", "~/.gnupg"],
@@ -448,6 +450,9 @@ Tier 2。沙箱 off/不可用时，可完整审查的非提权 bash 同样交 AI
   }
 }
 ```
+
+`outsideWriteRoots` 是静态的人工授权：文件工具（`write`/`edit`）写入这些目录时不询问、不交 AI；
+它**不改变** bash 的沙箱边界（bash 仍受 `sandbox.allowWrite` 约束），也不能被项目配置设置。
 
 **动作**：`allow`（放行）、`ask`（询问）、`deny`（阻止）。surface 的值可以是单个
 动作，也可以是 `{ "<glob>": <action> }` 映射：**`*` 匹配包括 `/` 在内的任意字符**、

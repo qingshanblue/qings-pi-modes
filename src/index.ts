@@ -6,7 +6,7 @@
  * in `schema.ts` and shipped as data in `permission-mode.defaults.json`; users
  * override or extend it in `permission-mode.json`. The three orthogonal axes:
  *
- *   mode    (alt+m) - WHO approves an `ask`: plan → ask → edits → auto → accept.
+ *   mode    (alt+m) - WHO approves an `ask`: plan → ask → auto → accept (`edits` is named-only).
  *   sandbox (alt+s) - the OS boundary (off / on / strict), only about out-of-project access.
  *   network (alt+n) - a domain allowlist, toggled filtered ⇄ open for the session.
  *
@@ -84,6 +84,7 @@ import {
 import type { PermState } from "./modes.ts";
 import { type NetAskResult, NetworkSession, isHostAllowed, normalizeDomain } from "./network.ts";
 import { blockablePath, canonicalPath, displayPath, isOutside, isProtectedWrite, normalizeToolPath, resolvePlanPath, sandboxAllowedRoots } from "./paths.ts";
+import { routeAsk } from "./route.ts";
 import {
   approvalMessage,
   DEFAULT_APPROVE_MODE,
@@ -97,7 +98,7 @@ import {
   showPlanSucceeded,
   shownPlanPath,
 } from "./plan-approval.ts";
-import { decide, decideBashChain, mostRestrictive } from "./resolve.ts";
+import { decide, decideBashChain, expandHome, mostRestrictive } from "./resolve.ts";
 import { SandboxController, commandFilesDir, networkFiltered, runtimeInstallDir, withDeniedReads } from "./sandbox.ts";
 import { ensureScratchDir, scratchBase, scratchBaseOverridden, scratchDirName, sweepScratchDirs, withScratchDir } from "./scratch.ts";
 import {
@@ -363,10 +364,18 @@ export default async function (pi: ExtensionAPI) {
     // mode sets `aiGatesUnsandboxed` (factory auto: true) AND the request is a
     // fully inspectable, non-privileged, non-sandbox-escape bash ask. Privilege,
     // escapes from an enforcing sandbox, and outside file-tool writes stay human.
-    if (review.escalateToHuman) {
-      if (review.privilege || review.sandboxEscape || review.neverAI || !currentMode().aiGatesUnsandboxed || review.inspectable === false) {
-        return humanPrompt();
-      }
+    if (
+      routeAsk({
+        classifierEnabled: cfg.enabled,
+        escalateToHuman: review.escalateToHuman === true,
+        privilege: review.privilege === true,
+        sandboxEscape: review.sandboxEscape === true,
+        neverAI: review.neverAI === true,
+        inspectable: review.inspectable,
+        unsandboxedAI: currentMode().aiGatesUnsandboxed === true,
+      }) === "human"
+    ) {
+      return humanPrompt();
     }
     const targets = Array.isArray(target) ? target : [target];
     const subject: ClassifierSubject = {
@@ -728,7 +737,7 @@ export default async function (pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       const arg = args.trim().toLowerCase();
       if (arg === "") {
-        if (!ctx.hasUI) return ctx.ui.notify(`permission-mode: usage: /permission [${config.cycleOrder.join("|")}|init|clear-approvals|blocks|unblock <path>]`, "warning");
+        if (!ctx.hasUI) return ctx.ui.notify(`permission-mode: usage: /permission [${[...config.cycleOrder, ...Object.keys(config.modes).filter((n) => !config.cycleOrder.includes(n))].join("|")}|init|clear-approvals|blocks|unblock <path>]`, "warning");
         const options = config.cycleOrder.map((name) => `${name === modeName ? "✓" : " "} ${config.modes[name]?.label ?? name}`);
         const picked = await ctx.ui.select("Permission mode (alt+m cycles)", options);
         const idx = picked ? options.indexOf(picked) : -1;
@@ -785,7 +794,7 @@ export default async function (pi: ExtensionAPI) {
         }
       }
       if (hasMode(config.modes, arg)) await setMode(arg, ctx);
-      else ctx.ui.notify(`permission-mode: unknown mode or subcommand "${arg}"; usage: /permission [${config.cycleOrder.join("|")}|init|clear-approvals|blocks|unblock <path>]`, "warning");
+      else ctx.ui.notify(`permission-mode: unknown mode or subcommand "${arg}"; usage: /permission [${[...config.cycleOrder, ...Object.keys(config.modes).filter((n) => !config.cycleOrder.includes(n))].join("|")}|init|clear-approvals|blocks|unblock <path>]`, "warning");
     },
   });
   /** Persist a classifier model ref and refresh the live session state. */
@@ -1516,7 +1525,11 @@ export default async function (pi: ExtensionAPI) {
       if (blocked.covers(canonicalPath(root, path))) {
         return { block: true, reason: `Path "${path}" is blocked for this session (Deny and block); /perm unblock lifts it` };
       }
-      const outside = isOutside(root, path, bounds);
+      // Global `outsideWriteRoots`: an explicit, static write allowance for
+      // edits outside the project (protected paths were already blocked above).
+      // Reads and ls/grep/find are unaffected.
+      const writeRoots = surface === "write" || surface === "edit" ? (config.outsideWriteRoots ?? []).map((r) => canonicalPath(root, expandHome(r))) : [];
+      const outside = isOutside(root, path, [...bounds, ...writeRoots]);
       // Sandbox `strict`: the boundary is hard for file tools too.
       if (effectiveSandboxState(m) === "strict" && outside) {
         return { block: true, reason: `Sandbox strict: outside-project access is blocked (${path})` };

@@ -763,20 +763,20 @@ test("/permission: a bare call opens the mode picker, an unknown argument prints
     assert.match(h.ctx.status, /^Ask /);
     await h.permission("buidl");
     assert.match(h.ctx.status, /^Ask /);
-    assert.match(h.ctx.notices.at(-1) ?? "", /unknown mode or subcommand "buidl"; usage: \/permission \[plan\|ask\|edits\|auto\|accept\|init/);
+    assert.match(h.ctx.notices.at(-1) ?? "", /unknown mode or subcommand "buidl"; usage: \/permission \[plan\|ask\|auto\|accept\|edits\|init/);
 
     // No args: the interactive picker lists the cycleOrder with the current mode marked.
     await h.permission("");
     const picker = h.ctx.prompts.at(-1)!;
     assert.match(picker.title, /Permission mode/);
-    assert.equal(picker.options.length, 5);
+    assert.equal(picker.options.length, 4);
     assert.match(picker.options[1], /^✓/); // "ask" is current (cycleOrder[1])
 
     // Dismiss (no scripted answer) changes nothing; picking an entry switches.
     assert.match(h.ctx.status, /^Ask /);
-    h.ctx.answers.push(picker.options[2]); // "edits"
+    h.ctx.answers.push(picker.options[2]); // "auto"
     await h.permission("");
-    assert.match(h.ctx.status, /^Edits /);
+    assert.match(h.ctx.status, /^Auto /);
   } finally {
     h.cleanup();
   }
@@ -785,12 +785,10 @@ test("/permission: a bare call opens the mode picker, an unknown argument prints
 test("alt+m cycles modes and persists the choice as a session entry", { skip }, async () => {
   const h = await setup();
   try {
-    // ask → edits → auto → accept (permission order)
-    await h.pi.shortcuts.get("alt+m")!(h.ctx);
-    assert.match(h.ctx.status, /^Edits /);
-    assert.deepEqual(h.pi.entries.at(-1), { customType: "perm-mode", data: { mode: "edits" } });
+    // ask → auto → accept (cycle order; `edits` is named-only)
     await h.pi.shortcuts.get("alt+m")!(h.ctx);
     assert.match(h.ctx.status, /^Auto /);
+    assert.deepEqual(h.pi.entries.at(-1), { customType: "perm-mode", data: { mode: "auto" } });
     await h.pi.shortcuts.get("alt+m")!(h.ctx);
     assert.match(h.ctx.status, /^Accept /);
   } finally {
@@ -1688,6 +1686,30 @@ test("approval prompts show exactly what is being approved", { skip }, async () 
     assert.match(longTitle, /\$ npm run build/);
     assert.match(longTitle, /curl evil\.example\.com/, "the targeted tail must stay visible");
     assert.match(longTitle, /\(\+\d+ chars\)/);
+  } finally {
+    h.cleanup();
+  }
+});
+
+test("outsideWriteRoots: a granted root is writable without a prompt; other outside writes still ask", { skip }, async () => {
+  const registry = classifierRegistry(allowReply);
+  const h = await setup({ permFlag: "auto", modelRegistry: registry, model: { id: "m", provider: "p" } });
+  try {
+    const dir = path.join(h.agentDir, "permission-mode");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "permission-mode.json"), JSON.stringify({ outsideWriteRoots: ["/etc/pm-roots"] }));
+    await h.pi.emit("session_start", {}, h.ctx);
+    // Granted root: silent, and the classifier is not involved (static allowance).
+    assert.equal(await h.call("write", { path: "/etc/pm-roots/notes.txt", content: "x" }), undefined);
+    assert.equal(h.ctx.prompts.length, 0);
+    assert.equal(registry.calls.length, 0);
+    // Not granted: still an outside-project human prompt, never the AI.
+    h.ctx.answers.push("Deny");
+    assert.equal((await h.call("write", { path: "/etc/pm-other.txt", content: "x" }))?.block, true);
+    assert.match(h.ctx.prompts.at(-1)?.title ?? "", /Outside project/);
+    assert.equal(registry.calls.length, 0);
+    // Protected paths stay hard-blocked even inside a granted root.
+    assert.equal((await h.call("write", { path: "/etc/pm-roots/.git/config", content: "x" }))?.block, true);
   } finally {
     h.cleanup();
   }

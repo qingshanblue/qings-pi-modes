@@ -55,7 +55,7 @@ you can rely on it appropriately.
   the human (denied in a headless session). Any other sandbox-off/unavailable
   bash ask goes to the classifier only when fully inspectable; uninspectable,
   truncated, or script-referencing payloads, and protected paths, still go to
-  the human or are hard-blocked. Direct project-local scripts are bounded to
+  the human or are hard-blocked. A global `outsideWriteRoots` list (static, human-chosen) lets file-tool writes into those directories proceed without a prompt; the AI is not consulted and a project cannot set it. Direct project-local scripts are bounded to
   8 KiB in the review context; outside scripts are never read into that
   context, and common source/eval/substitution/nested-shell references fall back
   to the human. This is a trust declaration for an operator who trusts the

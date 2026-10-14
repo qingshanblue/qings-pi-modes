@@ -4,7 +4,6 @@
   "cycleOrder": [
     "plan",
     "ask",
-    "edits",
     "auto",
     "accept"
   ],

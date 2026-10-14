@@ -388,6 +388,7 @@ function mergeGlobal(base: PermissionModeConfig, over: Partial<PermissionModeCon
     network = { ...(base.network ?? {}), ...patch } as NetworkConfig;
   }
   const statusFormat = over.statusFormat === "verbose" || over.statusFormat === "compact" ? over.statusFormat : base.statusFormat;
+  const outsideWriteRoots = isStringArray(over.outsideWriteRoots) ? over.outsideWriteRoots : base.outsideWriteRoots;
   return {
     defaultMode,
     cycleOrder,
@@ -397,6 +398,7 @@ function mergeGlobal(base: PermissionModeConfig, over: Partial<PermissionModeCon
     ...(plan ? { plan } : {}),
     ...(mergedClassifier ? { classifier: mergedClassifier } : {}),
     ...(statusFormat ? { statusFormat } : {}),
+    ...(outsideWriteRoots ? { outsideWriteRoots } : {}),
   };
 }
 
@@ -533,6 +535,9 @@ function applyProject(config: PermissionModeConfig, project: unknown, onError: O
   }
   if (project.plan !== undefined) {
     onError("permission-mode: project config cannot set plan (approval settings are global); ignoring");
+  }
+  if (project.outsideWriteRoots !== undefined) {
+    onError("permission-mode: project config cannot set outsideWriteRoots (write grants outside the project are global); ignoring");
   }
   if (project.classifier !== undefined) {
     onError("permission-mode: project config cannot set classifier (reviewer settings are global); ignoring");
