@@ -4,6 +4,54 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## qings-pi-modes 1.2.0 — 2026-10-14
+
+**Shipped-defaults change: `auto` is now substantially more autonomous.** The
+factory `auto` mode no longer routes file writes/edits, web search or skills
+through the AI classifier — they run automatically — and a set of common build
+test commands is whitelisted for bash. Everything that would escape the sandbox
+still requires the human. Users who ran `/permission init` will be told which
+of their values is now outdated; the shipped `auto` system prompt was updated
+to match.
+
+### Changed
+- **Factory `auto` defaults** (`permission-mode.defaults.json`, via
+  `defaults-history.json`):
+  - `permission.write` / `permission.edit`: `ask` → **`allow`** (protected
+    paths and out-of-project writes stay hard-gated by the human);
+  - `permission.web_search` / `permission.skill`: `ask` → **`allow`**;
+  - `permission.bash`: `"ask"` → a pattern map that **auto-allows common
+    command families** (`npm run *`, `npm test*`, `git add *`,
+    `git commit *`, `make *`, `python -m pytest*`) while keeping `"*": "ask"`
+    for everything else — non-whitelisted bash is still AI-classifier-gated;
+  - `modes.auto.systemPrompt` rewritten to describe the new division of labor.
+- **Wider default network allowlist**: `*.githubusercontent.com` (GitHub's
+  release/objects CDN) and `cache.nixos.org` / `nixos.org` (NixOS hosts).
+
+### Security
+- **File-tool writes/edits outside the project are no longer judged by the AI
+  classifier — they always go to the human.** The file tools are never
+  sandboxed, so an outside write is by definition an unsandboxed mutation; the
+  previous classifier gate was a heuristic and contradicted the documented
+  escape invariant. Outside reads / `ls` / `grep` / `find` stay
+  classifier-gated.
+
+### Fixed
+- `auto` with the sandbox off/unavailable no longer replaces the classifier
+  footer chip with `AI:no-box` — the classifier still reviews file / extension
+  / web asks; only unsandboxed bash escalates to the human. The verbose footer
+  spells out the bash caveat.
+- Approval prompts now show exactly what is being approved: the **full bash
+  command** (multi-line commands render in full), file-tool prompts use the
+  concrete verb and path (`Allow write to notes.txt?`), `web_search` prompts
+  show the query, and first-use extension-tool prompts include the call input.
+
+### Performance
+- Classifier requests carry a stable per-session id (OpenAI
+  `prompt_cache_key` affinity, Anthropic session-affinity headers), the review
+  prompt leads with session-stable facts (`in-bounds roots` before the
+  per-turn requests), and the verdict cache TTL is 5 minutes.
+
 ## qings-pi-modes 1.1.0 — 2026-10-14
 
 Fewer manual approvals in `auto` (via a safer escape path), a wider default

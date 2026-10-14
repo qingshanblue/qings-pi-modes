@@ -140,15 +140,16 @@ function boundedInput(input: unknown, maxChars: number): string {
 }
 
 export function buildReviewPrompt(subject: ClassifierSubject, maxInputChars = DEFAULT_CLASSIFIER_CONFIG.maxInputChars): { systemPrompt: string; content: string } {
-  // Ordering is deliberate for provider prefix-cache hits: the STABLE session
-  // block (mode/cwd) and the recent user requests come first, and the
-  // per-action details (surface/tool/targets/input) fill the volatile tail.
-  // Two classifier calls in the same user turn then share everything up to
-  // their first differing line.
+  // Ordering is deliberate for provider prefix-cache hits: STABLE session facts
+  // (mode/cwd/in-bounds roots) come first, then the per-turn user requests, and
+  // the per-action details (surface/tool/targets/input) fill the volatile tail.
+  // On providers with automatic prefix caching (OpenAI/DeepSeek style) two
+  // classifier calls then share everything up to their first differing line.
   const lines = [
     `mode: ${subject.mode}`,
     `cwd: ${subject.cwd}`,
   ];
+  if (subject.inBounds && subject.inBounds.length > 0) lines.push(`in-bounds roots: ${subject.inBounds.join(", ")}`);
   if (subject.recentUserRequest) {
     lines.push("user's recent requests:", subject.recentUserRequest);
   }
@@ -157,7 +158,6 @@ export function buildReviewPrompt(subject: ClassifierSubject, maxInputChars = DE
     `tool: ${subject.tool}`,
     `outside project: ${subject.isOutside ? "yes" : "no"}`,
   );
-  if (subject.inBounds && subject.inBounds.length > 0) lines.push(`in-bounds roots: ${subject.inBounds.join(", ")}`);
   if (subject.targets.length > 0) lines.push(`targets: ${subject.targets.join(", ")}`);
   lines.push("action input:", boundedInput(subject.input, maxInputChars));
   return { systemPrompt: SYSTEM_PROMPT, content: lines.join("\n") };
@@ -254,6 +254,10 @@ export interface ClassifyAskOptions {
   config: ClassifierConfig;
   subject: ClassifierSubject;
   signal?: AbortSignal;
+  /** Stable per-session id. Handed to the provider layer so OpenAI-style APIs
+   * get a `prompt_cache_key` (routing affinity) and Anthropic gets session
+   * affinity headers — both raise prompt-cache hit rates across classifier calls. */
+  sessionId?: string;
 }
 
 /**
@@ -262,14 +266,14 @@ export interface ClassifyAskOptions {
  * caller can apply its fail-closed / human-fallback policy.
  */
 export async function classifyAsk(opts: ClassifyAskOptions): Promise<ClassifierVerdict> {
-  const { registry, model, config, subject, signal } = opts;
+  const { registry, model, config, subject, signal, sessionId } = opts;
   if (!model) throw new Error("no classifier model is available");
   if (typeof registry.complete !== "function") throw new Error("the model registry cannot complete requests");
   const { systemPrompt, content } = buildReviewPrompt(subject, config.maxInputChars);
   const completion = registry.complete(
     model,
     { systemPrompt, messages: [{ role: "user", content, timestamp: Date.now() }] },
-    { maxTokens: config.maxTokens, temperature: 0, maxRetries: 0, timeoutMs: config.timeoutMs, signal },
+    { maxTokens: config.maxTokens, temperature: 0, maxRetries: 0, timeoutMs: config.timeoutMs, signal, sessionId },
   );
   const message = await withTimeout(completion, config.timeoutMs);
   return parseVerdict(extractAssistantText(message));
@@ -313,7 +317,10 @@ export class VerdictCache {
   private maxEntries: number;
   private ttlMs: number;
 
-  constructor(maxEntries = 64, ttlMs = 60_000) {
+  /** 5 min: keys already carry the model + full subject (incl. the user's
+   * recent requests), so a longer TTL only risks reusing a verdict whose
+   * AUTHORIZATION context changed — and that changes the key, not the age. */
+  constructor(maxEntries = 64, ttlMs = 300_000) {
     this.maxEntries = maxEntries;
     this.ttlMs = ttlMs;
   }

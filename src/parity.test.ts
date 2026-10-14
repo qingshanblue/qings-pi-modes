@@ -82,6 +82,32 @@ test("edits: in-project file edits silent; bash still asks; out-of-project asks"
   assert.equal(esc.onApproveUnsandboxed, true);
 });
 
+test("auto: writes/edits and whitelisted bash families allow; the rest asks; escapes reach the human", () => {
+  const a = M.auto;
+  const sb = sbOf(a);
+  assert.equal(a.classifier, true);
+  assert.equal(decide(a, "write", "src/app.ts"), "allow");
+  assert.equal(decide(a, "edit", "src/app.ts"), "allow");
+  assert.equal(decide(a, "web_search", "x"), "allow");
+  assert.equal(decide(a, "skill", "deep-research"), "allow");
+  assert.equal(decide(a, "tool", "some_extension_tool"), "ask");
+  // Whitelisted bash families are Tier-0 allows; other bash still asks.
+  assert.equal(decide(a, "bash", "npm run build"), "allow");
+  assert.equal(decide(a, "bash", "npm test"), "allow");
+  assert.equal(decide(a, "bash", "git commit -m x"), "allow");
+  assert.equal(decide(a, "bash", "make --version"), "allow");
+  assert.equal(decide(a, "bash", "rm -rf build"), "ask");
+  assert.equal(decide(a, "read", "/etc/hosts", { isOutside: true }), "ask"); // external_directory
+  // In-project ask → prompt that stays sandboxed.
+  const g = bashGate(decide(a, "bash", "curl example.com"), undefined, sb.enabled, true);
+  assert.equal(g.kind, "prompt");
+  assert.equal(g.onApproveUnsandboxed, false);
+  // Escapes go to the human and run unsandboxed on approval.
+  const esc = bashGate(decide(a, "bash", "sudo x"), OUTSIDE, sb.enabled, true);
+  assert.equal(esc.kind, "prompt");
+  assert.equal(esc.onApproveUnsandboxed, true);
+});
+
 test("accept: everything allowed, protected paths bypassed; decoupled from the sandbox", () => {
   const y = M.accept;
   const sb = sbOf(y); // no pin → the session default ("on")

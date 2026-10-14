@@ -51,8 +51,12 @@ you can rely on it appropriately.
   command OUTSIDE the sandbox — privilege escalation, a write escape, or any
   ask while the sandbox is off/unavailable — is never handed to the classifier
   at all: it always goes to the human prompt (denied in a headless session). A
-  READ-ONLY out-of-project access is not such an ask: the sandbox already
-  permits outside reads, so it stays sandboxed and is gated by the classifier.
+  READ-ONLY out-of-project access is not such an ask for bash: the sandbox
+  already permits outside reads, so it stays sandboxed and is gated by the
+  classifier. The file tools are never sandboxed, so for them the rule applies
+  by definition: a write or edit outside the project goes to the human, while
+  outside reads / `ls` / `grep` / `find` stay classifier-gated (reads are
+  best-effort by design — see below).
 
 - **Reads are deny-listed, not allow-listed.** The sandbox blocks out-of-project
   *writes* at the kernel, but reads stay broad (so build tools work) except for

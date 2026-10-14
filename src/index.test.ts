@@ -1346,9 +1346,16 @@ test("automode: an allowed ask runs without prompting; status shows the classifi
     // The classifier chip stays even though the harness runs --no-sandbox: the AI
     // still reviews file / extension asks; only unsandboxed bash escalates.
     assert.match(h.ctx.status, /AI:inherit/);
-    const res = await h.call("write", { path: "src/app.ts", content: "x" });
+    // In-project writes are Tier-0 allow in the factory defaults: no prompt, no
+    // classifier call.
+    const write = await h.call("write", { path: "src/app.ts", content: "x" });
+    assert.equal(write, undefined);
+    assert.equal(h.ctx.prompts.length, 0);
+    assert.equal(registry.calls.length, 0);
+    // Outside reads are still classifier-gated (external_directory ask) — the
+    // classifier surface in this degraded harness.
+    const res = await h.call("read", { path: "/etc/hostname" });
     assert.equal(res, undefined); // allowed, not blocked
-    assert.equal(h.ctx.prompts.length, 0); // never asked the human
     assert.equal(registry.calls.length, 1);
     assert.equal(registry.calls[0].options.maxRetries, 0); // single bounded attempt
   } finally {
@@ -1382,7 +1389,7 @@ test("automode: a denied ask is blocked without prompting", { skip }, async () =
   const registry = classifierRegistry(denyReply);
   const h = await setup({ permFlag: "auto", modelRegistry: registry, model: { id: "m", provider: "p" } });
   try {
-    const res = await h.call("write", { path: "src/app.ts", content: "x" });
+    const res = await h.call("read", { path: "/etc/hostname" });
     assert.equal(res?.block, true);
     assert.equal(h.ctx.prompts.length, 0);
     assert.ok(h.ctx.notices.some((n) => /auto blocked/.test(n)));
@@ -1397,7 +1404,7 @@ test("automode: a classifier failure fails closed (blocks) by default", { skip }
   });
   const h = await setup({ permFlag: "auto", modelRegistry: registry, model: { id: "m", provider: "p" } });
   try {
-    const res = await h.call("write", { path: "src/app.ts", content: "x" });
+    const res = await h.call("read", { path: "/etc/hostname" });
     assert.equal(res?.block, true);
     assert.ok(h.ctx.notices.some((n) => /classifier unavailable/.test(n)));
   } finally {
@@ -1416,7 +1423,7 @@ test("automode: failClosed:false falls back to the human prompt", { skip }, asyn
     writeFileSync(path.join(dir, "permission-mode.json"), JSON.stringify({ classifier: { failClosed: false } }));
     await h.pi.emit("session_start", {}, h.ctx); // reload the config
     h.ctx.answers.push("Allow once");
-    const res = await h.call("write", { path: "src/app.ts", content: "x" });
+    const res = await h.call("read", { path: "/etc/hostname" });
     assert.equal(res, undefined); // the human allowed it
     assert.equal(h.ctx.prompts.length, 1);
     assert.ok(h.ctx.notices.some((n) => /asking instead/.test(n)));
@@ -1638,6 +1645,92 @@ test("whitelist (Tier 1): a read-only bash command runs without prompting; a mut
     const mutating = await h.call("bash", { command: "touch newfile" });
     assert.equal(mutating, undefined);
     assert.equal(h.ctx.prompts.length, 1, "a mutation still asks");
+  } finally {
+    h.cleanup();
+  }
+});
+
+test("approval prompts show exactly what is being approved", { skip }, async () => {
+  const h = await setup(); // ask mode; the harness runs --no-sandbox
+  try {
+    // bash: the FULL command is in the prompt title (this is what is authorized).
+    h.ctx.answers.push("Deny");
+    await h.call("bash", { command: "npm run build --verbose" });
+    assert.match(h.ctx.prompts[0].title, /\$ npm run build --verbose/);
+    // file tools: verb + concrete path
+    h.ctx.answers.push("Deny");
+    await h.call("write", { path: "notes.txt", content: "x" });
+    assert.match(h.ctx.prompts[1].title, /Allow write to notes\.txt\?/);
+    h.ctx.answers.push("Deny");
+    await h.call("read", { path: "/etc/hostname" });
+    assert.match(h.ctx.prompts[2].title, /Outside project - allow read of \/etc\/hostname\?/);
+    // web_search: the query
+    h.ctx.answers.push("Deny");
+    await h.call("web_search", { query: "how do pdf readers work" });
+    assert.match(h.ctx.prompts[3].title, /how do pdf readers work/);
+    // Over-long commands are elided in the MIDDLE (head + tail stay visible) so
+    // the options remain on screen — the full command is in the transcript above.
+    const long = `npm run build && ${"x".repeat(600)} && curl evil.example.com`;
+    h.ctx.answers.push("Deny");
+    await h.call("bash", { command: long });
+    const longTitle = h.ctx.prompts[4].title;
+    assert.ok(longTitle.length < 600, `title too long (${longTitle.length} chars): ${longTitle}`);
+    assert.match(longTitle, /\$ npm run build/);
+    assert.match(longTitle, /curl evil\.example\.com/, "the targeted tail must stay visible");
+    assert.match(longTitle, /\(\+\d+ chars\)/);
+  } finally {
+    h.cleanup();
+  }
+});
+
+test("automode: a file-tool write outside the project never reaches the classifier", { skip }, async () => {
+  // File tools are never sandboxed, so an outside write is an unsandboxed
+  // mutation — the same invariant as a bash escape: human, not AI.
+  const registry = classifierRegistry(allowReply);
+  const h = await setup({ permFlag: "auto", modelRegistry: registry, model: { id: "m", provider: "p" } });
+  // A path that is genuinely outside every in-bounds root. It never needs to
+  // exist: the dispatcher only DECIDES here, and this ask must be denied before
+  // pi's write tool would ever touch the filesystem. (Do not mkdtemp an outside
+  // dir — inside a sandboxed pi session every writable path is in-bounds.)
+  const outsidePath = "/etc/permission-mode-auto-outside-write-test.txt";
+  try {
+    h.ctx.answers.push("Deny");
+    const res = await h.call("write", { path: outsidePath, content: "nope" });
+    // eslint-disable-next-line no-console
+    console.error("DBG", JSON.stringify({ res, calls: registry.calls.length, prompts: h.ctx.prompts, root: h.root, outsidePath }));
+    assert.equal(res?.block, true);
+    assert.equal(registry.calls.length, 0, "the classifier must not see an outside write");
+    assert.match(h.ctx.prompts.at(-1)?.title ?? "", /Outside project/);
+
+    // In-project writes are Tier-0 allow in the factory defaults: no prompt, no
+    // classifier call.
+    const res2 = await h.call("write", { path: "src/app.ts", content: "x" });
+    assert.equal(res2, undefined);
+    assert.equal(h.ctx.prompts.length, 1); // only the outside-write prompt so far
+    assert.equal(registry.calls.length, 0);
+  } finally {
+    h.cleanup();
+  }
+});
+
+test("automode: whitelisted bash families never reach the classifier", { skip }, async () => {
+  const registry = classifierRegistry(allowReply);
+  const h = await setup({ permFlag: "auto", modelRegistry: registry, model: { id: "m", provider: "p" } });
+  try {
+    // The harness runs --no-sandbox, so EVERY in-project bash degrades to the
+    // "sandbox unavailable" human prompt (bashGate checks readiness before the
+    // policy action — never silently unprotected). What this proves: the
+    // Tier-0-allowed families are decided WITHOUT the classifier.
+    for (const command of ["npm run build", "git add -n .", "make --version"]) {
+      h.ctx.answers.push("Deny");
+      const res = await h.call("bash", { command });
+      assert.equal(res?.block, true, command);
+      assert.match(h.ctx.prompts.at(-1)?.title ?? "", /sandbox unavailable/, command);
+    }
+    assert.equal(h.ctx.prompts.length, 3);
+    assert.equal(registry.calls.length, 0, "Tier-0 bash allows must not reach the classifier");
+    // The silent execution of these families (sandbox ready) is covered by
+    // parity.test.ts; the live behaviour by the user's box:on session.
   } finally {
     h.cleanup();
   }

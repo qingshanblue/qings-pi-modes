@@ -50,7 +50,10 @@
       "github.com",
       "*.github.com",
       "api.github.com",
-      "raw.githubusercontent.com"
+      "raw.githubusercontent.com",
+      "*.githubusercontent.com",
+      "cache.nixos.org",
+      "nixos.org"
     ],
     "deniedDomains": []
   },
@@ -112,7 +115,7 @@
       "label": "Auto",
       "color": "warning",
       "classifier": true,
-      "systemPrompt": "Auto mode is active: risky actions (writes, non-read bash, out-of-project access, extension tools) are reviewed by an AI safety classifier instead of prompting the human every time. Keep actions scoped to the project, reversible, and aligned with the request; secret access, privilege escalation, and data exfiltration are blocked.",
+      "systemPrompt": "Auto mode is active: file writes/edits, common build/test commands, web search and skills run automatically; other bash commands are reviewed by an AI safety classifier, and anything that would escape the sandbox (privilege escalation, writes outside the project) is escalated to the human. Keep actions scoped to the project, reversible, and aligned with the request; secret access, privilege escalation, and data exfiltration are blocked.",
       "permission": {
         "path": {
           "*": "allow"
@@ -122,14 +125,20 @@
         "grep": "allow",
         "find": "allow",
         "ls": "allow",
-        "write": "ask",
-        "edit": "ask",
+        "write": "allow",
+        "edit": "allow",
         "bash": {
-          "*": "ask"
+          "*": "ask",
+          "npm run *": "allow",
+          "npm test*": "allow",
+          "git add *": "allow",
+          "git commit *": "allow",
+          "make *": "allow",
+          "python -m pytest*": "allow"
         },
-        "web_search": "ask",
+        "web_search": "allow",
         "tool": "ask",
-        "skill": "ask"
+        "skill": "allow"
       }
     },
     "edits": {

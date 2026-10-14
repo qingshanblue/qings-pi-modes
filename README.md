@@ -32,7 +32,7 @@ bash 门控使用真正的 **tree-sitter AST**（不是正则），OS 沙箱由
 pi install npm:qings-pi-modes
 ```
 
-- `pi install npm:qings-pi-modes@1.1.0` —— 锁定版本（`pi update` 不会越过它）
+- `pi install npm:qings-pi-modes@1.2.0` —— 锁定版本（`pi update` 不会越过它）
 - `pi install -l npm:qings-pi-modes` —— 项目级安装（`.pi/` 内，可与团队共享）
 - `pi -e npm:qings-pi-modes` —— 不写入配置，单次试用
 
@@ -44,7 +44,7 @@ pi install git:github.com/qingshanblue/qings-pi-modes
 
 `pi install` 会自动执行 `npm install`（带入 `@anthropic-ai/sandbox-runtime`、tree-sitter 等运行时依赖）；pi SDK 作为 peer dependency 由宿主提供。两种来源通用：
 
-- `pi install git:github.com/qingshanblue/qings-pi-modes@v1.1.0` —— 按 tag 锁定
+- `pi install git:github.com/qingshanblue/qings-pi-modes@v1.2.0` —— 按 tag 锁定
 - `pi update --extensions` —— 之后拉取更新
 - `pi list` / `pi remove <source>` —— 查看 / 卸载
 
@@ -101,7 +101,7 @@ sudo apt install -y bubblewrap socat ripgrep
 | **plan** `⏸` | 规划模式。读免费；**只有 Markdown**（`*.md`/`*.markdown`）能在项目内创建/编辑，其它 `edit`/`write` 阻止。变更类 `bash` 会**弹窗询问**（只读命令走白名单免问）。系统提示引导模型：把计划写到 `plan/<YYYY-MM-DD>_<描述>.md`，用 **`show_plan`** 渲染给你审，然后交接：出现 **Accept / Decline** 卡片（见[批准计划](#批准一个计划)）。 |
 | **ask** `●` | 每个变更类操作都问你：`bash`/`edit`/`write`/web 搜索/扩展工具。读免费；白名单内的只读 bash 免问。批准的项目内 `bash` 在**沙箱内**运行。 |
 | **edits** `✎` | 项目内 `edit`/`write` **不再确认**（= Claude Code 的 accept-edits）；`bash` 仍逐条询问。项目内 `bash` 在**沙箱内**运行。 |
-| **auto** `▶` | 读免费；`bash`/`edit`/`write`、只读越界访问、web 搜索、扩展工具交给 **AI 安全分类器**判定而非逐条问你（见 [AI auto 模式](#ai-auto-模式)）。在**沙箱内**运行；会脱离沙箱的逃逸（写越界 / 提权）仍走人工。 |
+| **auto** `▶` | 项目内**读/写/改全自动**；白名单 bash（`npm run/test`、`git add/commit`、`make`、`pytest`）全自动；其余 bash、项目外读、扩展工具交给 **AI 安全分类器**（见 [AI auto 模式](#ai-auto-模式)）；会脱离沙箱的逃逸（写越界 / 提权）仍走人工。 |
 | **accept** `⚡` | **从不询问**（自动接受所有策略决定）——但仍**受沙箱边界约束**：`alt+m` 决定它能触达什么。无保护路径兜底。 |
 
 - 循环顺序 = 权限从低到高：`plan → ask → edits → auto → accept`。
@@ -198,7 +198,7 @@ touch，长会话不会被并发会话清扫掉。base 下的文件与符号链�
 ## 网络
 
 沙箱开启的模式里，bash 的网络流量按**域名 allowlist** 过滤（默认：npm、PyPI 及其文件 CDN、
-GitHub，以及 Rust/Go/Ruby/Maven 的包注册表）。
+GitHub 及其 CDN、Rust/Go/Ruby/Maven 包注册表、NixOS 缓存）。
 这不是一堵静默的墙——访问 allowlist 之外的主机时**会暂停并询问你**
 （*Allow for session / Allow forever / Deny*），然后放行或失败：
 
@@ -231,6 +231,11 @@ Tier 1   只读命令白名单（内置）           → 放行（无重定向/�
 Tier 2   其余 ask（含只读越界读）        → 模型审批（命令仍在沙箱内执行）
 旁路     会脱离沙箱的逃逸（提权 / 写越界 / 沙箱 off·不可用）→ **始终人工**（LLM 不得授予无沙箱执行；strict 沙箱态下直接 block）
 ```
+
+出厂 `auto` 的 **Tier 0** 已包含：`write`/`edit`、`web_search`、`skill`，以及
+bash 命令族 `npm run *` / `npm test*` / `git add *` / `git commit *` / `make *` /
+`python -m pytest*`——这些**完全不经过分类器**；其余 bash 与扩展工具首次使用走
+Tier 2。想调整就改全局配置里 `modes.auto.permission`（数据，随时改）。
 
 - 分类器**进程内**运行，走 pi 的模型层（`ctx.modelRegistry`），复用你真实的
   请求鉴权（models.json、OAuth、环境变量密钥），无需额外配置。

@@ -57,6 +57,12 @@ test("buildReviewPrompt: includes action fields and truncates long input", () =>
   assert.match(withBounds.content, /in-bounds roots: \/project, \/tmp\/pi/);
   const noBounds = buildReviewPrompt(subject(), 40);
   assert.ok(!noBounds.content.includes("in-bounds roots"), "in-bounds line omitted when unknown");
+  // Cache-friendly ordering: session-stable facts (mode/cwd/in-bounds) come
+  // BEFORE the per-turn user requests, so the shared prefix is as long as possible.
+  const both = buildReviewPrompt(subject({ inBounds: ["/project"], recentUserRequest: "do the thing" }), 400);
+  const idxBounds = both.content.indexOf("in-bounds roots:");
+  const idxRecent = both.content.indexOf("user's recent requests:");
+  assert.ok(idxBounds > -1 && idxRecent > -1 && idxBounds < idxRecent, "in-bounds roots precede the user requests");
   const long = buildReviewPrompt(subject({ input: { command: "x".repeat(500) } }), 40);
   assert.match(long.content, /truncated/);
 });
@@ -105,6 +111,24 @@ test("classifyAsk: completes in-process and parses the verdict", async () => {
   assert.equal(seen?.options.maxRetries, 0); // single bounded attempt
   assert.equal(seen?.options.temperature, 0);
   assert.match(seen?.context.systemPrompt, /security reviewer/i);
+});
+
+test("classifyAsk: forwards a stable sessionId for provider cache affinity", async () => {
+  let seen: { options: any } | undefined;
+  const registry = {
+    complete: async (_model: unknown, _context: any, options: any) => {
+      seen = { options };
+      return { content: [{ type: "text", text: '{"allow":true,"risk":"low","reason":"ok"}' }] };
+    },
+  };
+  await classifyAsk({
+    registry,
+    model: { id: "m" },
+    config: DEFAULT_CLASSIFIER_CONFIG,
+    subject: subject(),
+    sessionId: "sess-abc",
+  });
+  assert.equal(seen?.options.sessionId, "sess-abc");
 });
 
 test("classifyAsk: failures throw (so the caller can fail closed)", async () => {

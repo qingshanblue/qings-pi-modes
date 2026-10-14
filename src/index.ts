@@ -376,6 +376,8 @@ export default async function (pi: ExtensionAPI) {
           config: cfg,
           subject,
           signal: ctx.signal,
+          // Stable per session: raises provider prompt-cache affinity across asks.
+          sessionId: ctx.sessionManager?.getSessionId?.(),
         });
         classifierCache.set(key, verdict);
       }
@@ -399,6 +401,42 @@ export default async function (pi: ExtensionAPI) {
     }
     if (ctx.hasUI) ctx.ui.notify(`permission-mode: auto blocked ${surface} (${verdict.reason})`, "warning");
     return false;
+  };
+
+  // Approval prompts must show exactly what is being authorized — but the
+  // overlay renders the title ABOVE the options with no scrolling, so an
+  // over-long title pushes the options off screen. Keep titles within a few
+  // wrapped lines: flatten newlines and elide the MIDDLE of over-long text, so
+  // both the invoked head and the targeted tail stay visible. The full command
+  // is always visible in the transcript above the prompt anyway.
+  const TITLE_MAX_CHARS = 200;
+  const compactTitle = (text: string, max = TITLE_MAX_CHARS): string => {
+    const flat = text.replace(/\r?\n/g, " ⏎ ").replace(/[ \t]{2,}/g, " ").trim();
+    if (flat.length <= max) return flat;
+    const omitted = flat.length - max;
+    const head = Math.max(0, Math.floor(max * 0.6));
+    const tail = Math.max(0, max - head);
+    return `${flat.slice(0, head)}…(+${omitted} chars)…${flat.slice(flat.length - tail)}`;
+  };
+  const bashTitle = (gateTitle: string, command: string): string =>
+    `${compactTitle(gateTitle, 160)}\n$ ${compactTitle(command, 200)}`;
+  const jsonTitle = (value: unknown, max = 240): string => {
+    let text: string;
+    try {
+      text = JSON.stringify(value) ?? "";
+    } catch {
+      text = String(value);
+    }
+    return compactTitle(text, max);
+  };
+  /** Human verb per file tool: the prompt should say what will happen to the path. */
+  const FILE_TOOL_VERB: Record<string, string> = {
+    read: "read of",
+    write: "write to",
+    edit: "edit of",
+    ls: "listing of",
+    grep: "search in",
+    find: "search in",
   };
 
   /** Prompt to allow an `ask`, honoring session grants (a target list requires
@@ -1344,7 +1382,7 @@ export default async function (pi: ExtensionAPI) {
         if (gate.kind === "prompt") {
           // Without an AST parse, scope a session grant to the exact command.
           if (
-            !(await promptAllow(ctx, "bash", command, gate.title, undefined, undefined, {
+            !(await promptAllow(ctx, "bash", command, bashTitle(gate.title, command), undefined, undefined, {
               tool: "bash",
               input: { command },
               escalateToHuman: gate.onApproveUnsandboxed,
@@ -1428,7 +1466,7 @@ export default async function (pi: ExtensionAPI) {
         const hit = targets.map((t) => canonicalPath(root, t)).find((t) => blocked.covers(t));
         if (hit) return { block: true, reason: `Path ${displayPath(hit)} is blocked for this session (Deny and block); /perm unblock lifts it` };
         if (
-          !(await promptAllow(ctx, "bash", keys, gate.title, undefined, denyAndBlock(ctx, targets), {
+          !(await promptAllow(ctx, "bash", keys, bashTitle(gate.title, command), undefined, denyAndBlock(ctx, targets), {
             tool: "bash",
             input: { command },
             isOutside: Boolean(analysis.outsideReason),
@@ -1471,10 +1509,26 @@ export default async function (pi: ExtensionAPI) {
         return { block: true, reason: `Path "${path}" is blocked by ${m.label}` };
       }
       if (action === "ask") {
-        const title = outside ? `Outside project - allow ${toolName}? (${path})` : `Allow ${toolName}? (${path})`;
+        const verb = FILE_TOOL_VERB[toolName] ?? toolName;
+        const title = outside
+          ? `Outside project - allow ${verb} ${compactTitle(path, 120)}?`
+          : `Allow ${verb} ${compactTitle(path, 120)}?`;
         const reason = outside ? "Access outside project blocked" : "blocked";
         const denyAnd = outside ? denyAndBlock(ctx, [path]) : undefined;
-        if (!(await promptAllow(ctx, surface, path, title, undefined, denyAnd, { tool: toolName, input: { path }, isOutside: outside }))) return { block: true, reason };
+        // File tools are NEVER sandboxed, so a write/edit outside the project is
+        // by definition an unsandboxed mutation: it goes to the HUMAN, never to
+        // the classifier (same invariant as a bash escape). Outside reads and
+        // ls/grep/find stay classifier-gated (reads are best-effort by design).
+        const escalate = outside && (surface === "write" || surface === "edit");
+        if (
+          !(await promptAllow(ctx, surface, path, title, undefined, denyAnd, {
+            tool: toolName,
+            input: { path },
+            isOutside: outside,
+            escalateToHuman: escalate,
+          }))
+        )
+          return { block: true, reason };
       }
       return undefined; // allow
     }
@@ -1484,11 +1538,13 @@ export default async function (pi: ExtensionAPI) {
       const action = decide(m, "web_search", String(input.query ?? "(empty)"));
       if (action === "deny") return { block: true, reason: `web search blocked by ${m.label}` };
       // Session approval is surface-wide ("allow web search this session").
+      const query = String(input.query ?? "");
+      const wsTitle = query.trim() ? `Allow web search? — ${compactTitle(query, 160)}` : "Allow web search?";
       if (
         action === "ask" &&
-        !(await promptAllow(ctx, "web_search", "*", "Allow web search?", undefined, undefined, {
+        !(await promptAllow(ctx, "web_search", "*", wsTitle, undefined, undefined, {
           tool: "web_search",
-          input: { query: String(input.query ?? "") },
+          input: { query },
         }))
       ) {
         return { block: true, reason: "web search blocked" };
@@ -1503,7 +1559,15 @@ export default async function (pi: ExtensionAPI) {
       if (action === "deny") return { block: true, reason: `Tool "${toolName}" blocked by ${m.label}` };
       if (
         action === "ask" &&
-        !(await promptAllow(ctx, "tool", toolName, `Tool "${toolName}" — first use in ${m.label}; allow?`, learnForever(ctx, "tool", toolName), undefined, { tool: toolName, input }))
+        !(await promptAllow(
+          ctx,
+          "tool",
+          toolName,
+          `Tool "${toolName}" — first use in ${m.label}; allow?\n${jsonTitle(input, 240)}`,
+          learnForever(ctx, "tool", toolName),
+          undefined,
+          { tool: toolName, input },
+        ))
       ) {
         return { block: true, reason: "tool blocked" };
       }
