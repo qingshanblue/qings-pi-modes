@@ -32,7 +32,6 @@ bash 门控使用真正的 **tree-sitter AST**（不是正则），OS 沙箱由
 pi install npm:qings-pi-modes
 ```
 
-- `pi install npm:qings-pi-modes@1.2.0` —— 锁定版本（1.3.0 发布后改为 @1.3.0）（`pi update` 不会越过它）
 - `pi install -l npm:qings-pi-modes` —— 项目级安装（`.pi/` 内，可与团队共享）
 - `pi -e npm:qings-pi-modes` —— 不写入配置，单次试用
 
@@ -44,7 +43,6 @@ pi install git:github.com/qingshanblue/qings-pi-modes
 
 `pi install` 会自动执行 `npm install`（带入 `@anthropic-ai/sandbox-runtime`、tree-sitter 等运行时依赖）；pi SDK 作为 peer dependency 由宿主提供。两种来源通用：
 
-- `pi install git:github.com/qingshanblue/qings-pi-modes@v1.2.0` —— 按 tag 锁定
 - `pi update --extensions` —— 之后拉取更新
 - `pi list` / `pi remove <source>` —— 查看 / 卸载
 
