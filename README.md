@@ -215,6 +215,10 @@ GitHub 及其 CDN、Rust/Go/Ruby/Maven 包注册表、NixOS 缓存）。
 
 授权/拒绝/开关都是**会话级**的（"Allow forever" 除外），即时生效——不重启沙箱。
 
+**命令里写明的主机**（如 `curl https://…`）在执行**前**就按 allowlist 检查：不在名单内的会
+直接问你，**永远不交给 AI 分类器**；被拒的主机直接拦截；`alt+n` 的 open 状态同样放行。
+无沙箱时这一检查仍然生效，因为 allowlist 是你的出站策略。
+
 > ⚠️ 网络过滤由沙箱运行时的 socat 代理实现，因此**沙箱 `off` 时无法过滤**
 > （footer 显示 `net:open`）。这是运行时的硬约束。
 

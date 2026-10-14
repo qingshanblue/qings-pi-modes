@@ -4,11 +4,12 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## qings-pi-modes 1.3.0 — 2026-10-14
+## qings-pi-modes 1.4.0 — 2026-10-14
 
-Sandbox-off AI review becomes the default for `auto`, plus a static
-outside-write grant, a mode-cycle change, and a structural split of the
-dispatcher into pure, tested deciders. Built on the published 1.2.0.
+Sandbox-off AI review becomes the default for `auto`, plus a static outside-write
+grant, a mode-cycle change, and the architecture v2 rewrite: every allow / block /
+ask decision now comes from one pure function, `verdict()`, over gathered facts.
+Built on the published 1.2.0 (1.3.0 was never published and is folded in here).
 
 ### Changed
 - **Sandbox-off bash goes to the AI by default** (`aiGatesUnsandboxed`, set to
@@ -21,23 +22,27 @@ dispatcher into pure, tested deciders. Built on the published 1.2.0.
 - **Mode cycle is now `plan → ask → auto → accept`.** `edits` is still a
   built-in mode, selectable with `/permission edits`, but it is no longer in
   `alt+m`'s cycle and the `/permission` picker lists only the cycle.
-- **Dispatcher split into pure deciders** (no user-visible behavior change):
-  `src/route.ts` (human vs classifier, exhaustively tested), `src/action.ts`
-  (ask facts and title helpers), `src/file-gate.ts` (file-tool allow/block/ask),
-  and `src/bash-plan.ts` (bash allow/block/prompt, sandboxed and unsandboxed).
-  The `tool_call` handler now only gathers facts and carries out the plan.
+- **Hosts named in a bash command are checked against the allowlist before the
+  run.** A host outside the allowlist asks the human (never the classifier); a
+  denied host is blocked; `/net open` lifts the check for the session. This also
+  applies when the sandbox is unavailable, because the allowlist is the user's
+  egress policy. Allowing for session also grants the host to the network session.
 
 ### Added
 - **`outsideWriteRoots`** (global config): directories where file-tool
   `write`/`edit` is allowed without a prompt. A static human-chosen grant; the
   AI is not consulted, protected paths stay blocked, and bash is still bounded
   by the sandbox's `allowWrite`. A project config cannot set it.
+- **`src/facts.ts` and `src/verdict.ts`**: `CallFacts` (gathered per call) and
+  `verdict(facts, axes)` (the decision). Invariants N0–N6 are property-tested over
+  the whole fact/axis matrix. The superseded planners (`bash-plan`, `file-gate`)
+  are removed; `route.ts` remains the human-vs-classifier rule that `verdict` calls.
 
 ### Security
 - The `outsideWriteRoots` grant is the only new write allowance; it is global
-  config only and never reaches the classifier. The 1.2.0 escape rules are
-  unchanged: privilege, sandbox-on escapes, and outside file-tool writes stay
-  human-only.
+  config only and never reaches the classifier. The escape rules are unchanged:
+  privilege, sandbox-on escapes, and outside file-tool writes stay human-only.
+- A host named explicitly by bash is never judged by the classifier.
 
 ## qings-pi-modes 1.2.0 — 2026-10-14
 

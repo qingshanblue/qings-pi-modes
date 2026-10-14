@@ -38,6 +38,13 @@ you can rely on it appropriately.
   as a way to avoid noise for `ls`/`cat`/`grep`, never as containment. It only
   applies when the policy resolved to `ask` — an explicit `deny` still blocks.
 
+- **Hosts named in a bash command are checked before the run.** A host outside
+  the allowlist (and not denied) asks the human; the classifier never sees that
+  decision. The check applies with the sandbox off or unavailable, because the
+  allowlist is the user's egress policy. It does not cover hosts a program
+  reaches on its own at run time: the enforcing sandbox proxy remains the gate
+  for those.
+
 - **The AI classifier (`auto` mode) is a heuristic gate, not a boundary.** It
   reviews a pending tool call with an LLM and can be wrong in both directions.
   Its input includes model-authored text (the command and its arguments), so a

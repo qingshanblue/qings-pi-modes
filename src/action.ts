@@ -108,3 +108,19 @@ export const FILE_TOOL_VERB: Record<string, string> = {
   grep: "search in",
   find: "search in",
 };
+
+/** Bash prompt title: the policy/gate title, then the exact command (both compacted). */
+export function bashTitle(gateTitle: string, command: string): string {
+  return `${compactTitle(gateTitle, 160)}\n$ ${compactTitle(command, 200)}`;
+}
+
+/** Compact JSON for a tool input in a prompt title. */
+export function jsonTitle(value: unknown, max = 240): string {
+  let text: string;
+  try {
+    text = JSON.stringify(value) ?? "";
+  } catch {
+    text = String(value);
+  }
+  return compactTitle(text, max);
+}

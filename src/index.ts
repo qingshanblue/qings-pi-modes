@@ -53,10 +53,9 @@ import { createBashTool, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { askWithSession, BlockedPaths, type ApprovalUI, type DenyOption, SessionApprovals } from "./approvals.ts";
-import { allModeNames, buildBashAskReview, buildFileToolAskReview, compactTitle, fileToolAllowedRoots, modePickerOptions, type AskReview } from "./action.ts";
+import { allModeNames, bashTitle, compactTitle, fileToolAllowedRoots, jsonTitle, modePickerOptions, type AskReview } from "./action.ts";
 import { sandboxAwarenessPrompt } from "./awareness.ts";
 import { bashExecPlan } from "./bash-enforce.ts";
-import { planSandboxedBash, planUnsandboxedBash, type BashPlan } from "./bash-plan.ts";
 import { analyzeBash, reviewBashScripts, type ScriptReview } from "./bash-parse.ts";
 
 type ScriptReviewResult = { inspectable: boolean; scripts: ScriptReview[] };
@@ -88,8 +87,8 @@ import {
 import type { PermState } from "./modes.ts";
 import { type NetAskResult, NetworkSession, isHostAllowed, normalizeDomain } from "./network.ts";
 import { blockablePath, canonicalPath, displayPath, isOutside, isProtectedWrite, normalizeToolPath, resolvePlanPath, sandboxAllowedRoots } from "./paths.ts";
-import { gateFileTool } from "./file-gate.ts";
-import { routeAsk } from "./route.ts";
+import { bashFacts, fileFacts, toolFacts, webFacts } from "./facts.ts";
+import { type Axes, type Verdict, verdict } from "./verdict.ts";
 import {
   approvalMessage,
   DEFAULT_APPROVE_MODE,
@@ -340,19 +339,7 @@ export default async function (pi: ExtensionAPI) {
     // mode sets `aiGatesUnsandboxed` (factory auto: true) AND the request is a
     // fully inspectable, non-privileged, non-sandbox-escape bash ask. Privilege,
     // escapes from an enforcing sandbox, and outside file-tool writes stay human.
-    if (
-      routeAsk({
-        classifierEnabled: cfg.enabled,
-        escalateToHuman: review.escalateToHuman === true,
-        privilege: review.privilege === true,
-        sandboxEscape: review.sandboxEscape === true,
-        neverAI: review.neverAI === true,
-        inspectable: review.inspectable,
-        unsandboxedAI: currentMode().aiGatesUnsandboxed === true,
-      }) === "human"
-    ) {
-      return humanPrompt();
-    }
+    // Routing (human vs AI) was decided by verdict.ts before this point.
     const targets = Array.isArray(target) ? target : [target];
     const subject: ClassifierSubject = {
       mode: modeName,
@@ -405,18 +392,6 @@ export default async function (pi: ExtensionAPI) {
   };
 
   // Approval-title helpers live in action.ts (compactTitle, FILE_TOOL_VERB).
-  const bashTitle = (gateTitle: string, command: string): string =>
-    `${compactTitle(gateTitle, 160)}\n$ ${compactTitle(command, 200)}`;
-  const jsonTitle = (value: unknown, max = 240): string => {
-    let text: string;
-    try {
-      text = JSON.stringify(value) ?? "";
-    } catch {
-      text = String(value);
-    }
-    return compactTitle(text, max);
-  };
-
   /** Prompt to allow an `ask`, honoring session grants (a target list requires
    * every entry to be granted; granting remembers all). Returns true to allow.
    * When `onForever` is given, a fourth "Allow forever" option persists the rule.
@@ -1305,34 +1280,45 @@ export default async function (pi: ExtensionAPI) {
     return undefined; // allow → continue to expansion
   });
 
-  /** Carry out a bash plan: prompt (with session keys and escape targets), or pass through. */
-  const applyBashPlan = async (
-    ctx: ExtensionContext,
-    toolCallId: string,
-    plan: BashPlan,
-    command: string,
-    scriptReview: ScriptReviewResult,
-  ): Promise<{ block: true; reason: string } | undefined> => {
-    if (plan.kind === "allow") return undefined;
-    if (plan.kind === "block") return { block: true, reason: plan.reason };
-    const approved = await promptAllow(
-      ctx,
-      "bash",
-      plan.keys,
-      bashTitle(plan.title, command),
-      undefined,
-      plan.targets.length > 0 ? denyAndBlock(ctx, plan.targets) : undefined,
-      buildBashAskReview({
-        command,
-        outsideReason: plan.outsideReason,
-        sandboxReady: plan.sandboxReady,
-        sandboxEnabled: plan.sandboxEnabled,
-        unsandboxed: plan.unsandboxed,
-        scriptReview,
-      }),
-    );
-    if (!approved) return { block: true, reason: plan.reason };
-    if (plan.unsandboxed) approvedUnsandboxed.add(toolCallId);
+  /** The non-policy inputs to a decision, from live state. */
+  const axesFor = (m: ModeDef): Axes => {
+    const profile = modeSandbox(m);
+    const cfg = normalizeClassifierConfig(config.classifier);
+    const allowed = profile.network?.allowedDomains ?? [];
+    return {
+      root,
+      sandboxEnabled: profile.enabled,
+      sandboxState: effectiveSandboxState(m),
+      sandboxReady: sandbox.ready,
+      classifierOn: m.classifier === true && cfg.enabled,
+      unsandboxedAI: m.aiGatesUnsandboxed === true,
+      // The allowlist is the user's egress policy: it applies to any bash that
+      // names a host, enforced here before the run and by the sandbox proxy when
+      // it is enforcing. `/net open` lifts it for the session.
+      egressFiltered: profile.network?.allowedDomains !== undefined && !net.open,
+      egressOpen: net.open,
+      hostAllowed: (host) => isHostAllowed(host, allowed) || net.isGranted(host),
+      hostDenied: (host) => net.denies().includes(host),
+      blocked: (canonical) => blocked.covers(canonical),
+    };
+  };
+
+  /** Carry out a routing verdict: block (with notice), allow, or ask via the human or the AI. */
+  const runVerdict = async (ctx: ExtensionContext, toolCallId: string, v: Verdict): Promise<{ block: true; reason: string } | undefined> => {
+    if (v.kind === "allow") return undefined;
+    if (v.kind === "block") {
+      if (v.notice && ctx.hasUI) ctx.ui.notify(v.notice, "warning");
+      return { block: true, reason: v.reason };
+    }
+    const onForever = v.learnForever ? learnForever(ctx, "tool", v.target as string) : undefined;
+    const denyAnd = v.denyTargets.length > 0 ? denyAndBlock(ctx, v.denyTargets) : undefined;
+    const approved =
+      v.via === "ai" && v.review
+        ? await autoDecide(ctx, v.surface as Surface, v.target, v.title, onForever, denyAnd, v.review)
+        : await askWithSession(approvalUI(ctx), approvals, modeName, v.surface as Surface, v.target, v.title, onForever, denyAnd);
+    if (!approved) return { block: true, reason: v.reason };
+    if (v.grantHost) net.grant([v.grantHost]);
+    if (v.unsandboxed) approvedUnsandboxed.add(toolCallId);
     return undefined;
   };
 
@@ -1355,135 +1341,52 @@ export default async function (pi: ExtensionAPI) {
     // "outside project" nor — worse — run unsandboxed once the user approves.
     const bounds = sandboxAllowedRoots(root, effectiveSandbox(m));
 
-    // Hard backstop: never write to protected paths (file tools aren't sandboxed),
-    // unless the mode explicitly trusts everything (a mode with `bypassProtectedPaths`). Matched lexically AND
-    // on the symlink-resolved canonical path, so a link can't smuggle the write.
-    if (!m.bypassProtectedPaths && (toolName === "edit" || toolName === "write") && inPath !== undefined) {
-      if (isProtectedWrite(root, inPath)) {
-        if (ctx.hasUI) ctx.ui.notify(`Blocked write to protected path: ${inPath}`, "warning");
-        return { block: true, reason: `Path "${inPath}" is protected` };
-      }
-    }
-
-    // Bash. The decision is pure (bash-plan.ts); this branch gathers facts and
-    // carries out the plan (prompt, block, unsandboxed bookkeeping).
+    // Bash: gather facts (AST analysis, script review), then decide in verdict.ts.
     if (toolName === "bash") {
       const command = String(input.command ?? "");
-      if (!modeSandbox(m).enabled) {
-        // Without the OS sandbox there is no escape prompt, so the layer for
-        // out-of-project access is the mode's `external_directory` policy,
-        // folded in most-restrictively.
-        const analysis = await analyzeBash(command, root, bounds);
-        const action = decide(m, "bash", command);
-        const effective: Action =
-          analysis.outsideReason ? mostRestrictive(action, decide(m, "external_directory", command, { isOutside: true })) ?? action : action;
-        const scriptReview = reviewBashScripts(analysis.commands, root, command, analysis.usedFallback, bounds);
-        const plan = planUnsandboxedBash({
-          command,
-          effective,
-          outsideReason: analysis.outsideReason,
-          safeChain: isSafeBashChain(analysis.commands, command),
-          sandboxReady: sandbox.ready,
-        });
-        return applyBashPlan(ctx, event.toolCallId, plan, command, scriptReview);
-      }
-      // Real AST when available: judge each (possibly nested) command against the
-      // bash surface AND the cross-cutting path gate, most-restrictive across the chain.
       const analysis = await analyzeBash(command, root, bounds);
-      const action: Action = analysis.commands.length > 0 ? decideBashChain(m, analysis.commands) : decide(m, "bash", command);
       const scriptReview = reviewBashScripts(analysis.commands, root, command, analysis.usedFallback, bounds);
-      const plan = planSandboxedBash({
+      const facts = bashFacts({
         command,
         root,
         bounds,
-        action,
-        analysis,
+        mode: m,
+        modeLabel: m.label,
+        sandboxed: modeSandbox(m).enabled,
+        commands: analysis.commands,
+        outsideReason: analysis.outsideReason,
+        usedFallback: analysis.usedFallback,
         safeChain: isSafeBashChain(analysis.commands, command),
-        sandboxEnabled: true,
-        sandboxState: effectiveSandboxState(m),
-        sandboxReady: sandbox.ready,
-        isBlocked: (target) => blocked.covers(target),
+        scriptReview,
       });
-      return applyBashPlan(ctx, event.toolCallId, plan, command, scriptReview);
+      return runVerdict(ctx, event.toolCallId, verdict(facts, axesFor(m)));
     }
 
-    // File tools (read/edit/write/ls/grep/find).
+    // File tools (read/edit/write/ls/grep/find). Protected paths, session blocks,
+    // strict boundaries and policy all live in verdict.ts.
     const surface = FILE_TOOL_SURFACE[toolName];
     if (surface && inPath !== undefined) {
-      const path = inPath;
-      // A path blocked for the session ("Deny and block") is denied outright:
-      // the file tools are not sandboxed, so the kernel mask alone would not cover them.
-      if (blocked.covers(canonicalPath(root, path))) {
-        return { block: true, reason: `Path "${path}" is blocked for this session (Deny and block); /perm unblock lifts it` };
-      }
-      // Global `outsideWriteRoots`: an explicit, static write allowance for
-      // edits outside the project (protected paths were already blocked above).
-      // Reads and ls/grep/find are unaffected.
-      const writeRoots = fileToolAllowedRoots(root, surface, config.outsideWriteRoots);
-      const outside = isOutside(root, path, [...bounds, ...writeRoots]);
-      const gate = gateFileTool({
-        mode: m,
+      const facts = fileFacts({
+        tool: toolName,
         surface,
-        toolName,
-        path,
-        outside,
-        strict: effectiveSandboxState(m) === "strict",
+        path: inPath,
+        root,
+        inBounds: [...bounds, ...fileToolAllowedRoots(root, surface, config.outsideWriteRoots)],
+        mode: m,
+        modeLabel: m.label,
+        bypassProtectedPaths: m.bypassProtectedPaths === true,
       });
-      if (gate.kind === "block") {
-        if (gate.notice && ctx.hasUI) ctx.ui.notify(gate.notice, "warning");
-        return { block: true, reason: gate.reason };
-      }
-      if (gate.kind === "ask") {
-        // File tools are NEVER sandboxed, so a write/edit outside the project is
-        // by definition an unsandboxed mutation: it goes to the HUMAN, never to
-        // the classifier (buildFileToolAskReview sets neverAI for that case).
-        const denyAnd = outside ? denyAndBlock(ctx, [path]) : undefined;
-        if (
-          !(await promptAllow(ctx, surface, path, gate.title, undefined, denyAnd, buildFileToolAskReview({ tool: toolName, path, outside, surface })))
-        )
-          return { block: true, reason: gate.reason };
-      }
-      return undefined; // allow
+      return runVerdict(ctx, event.toolCallId, verdict(facts, axesFor(m)));
     }
 
-    // web_search.
+    // web_search: policy, then the classifier or the human (verdict.ts).
     if (toolName === "web_search") {
-      const action = decide(m, "web_search", String(input.query ?? "(empty)"));
-      if (action === "deny") return { block: true, reason: `web search blocked by ${m.label}` };
-      // Session approval is surface-wide ("allow web search this session").
-      const query = String(input.query ?? "");
-      const wsTitle = query.trim() ? `Allow web search? — ${compactTitle(query, 160)}` : "Allow web search?";
-      if (
-        action === "ask" &&
-        !(await promptAllow(ctx, "web_search", "*", wsTitle, undefined, undefined, {
-          tool: "web_search",
-          input: { query },
-        }))
-      ) {
-        return { block: true, reason: "web search blocked" };
-      }
-      return undefined;
+      return runVerdict(ctx, event.toolCallId, verdict(webFacts(typeof input.query === "string" ? input.query : undefined, m, m.label), axesFor(m)));
     }
 
-    // Custom / extension tools (incl. any MCP-as-tool): gate by tool name. An
-    // unknown tool prompts first-use (allow once/session/forever/deny).
+    // Custom / extension tools (incl. any MCP-as-tool): gate by tool name.
     if (!BUILTIN_HANDLED.has(toolName)) {
-      const action = decide(m, "tool", toolName);
-      if (action === "deny") return { block: true, reason: `Tool "${toolName}" blocked by ${m.label}` };
-      if (
-        action === "ask" &&
-        !(await promptAllow(
-          ctx,
-          "tool",
-          toolName,
-          `Tool "${toolName}" — first use in ${m.label}; allow?\n${jsonTitle(input, 240)}`,
-          learnForever(ctx, "tool", toolName),
-          undefined,
-          { tool: toolName, input },
-        ))
-      ) {
-        return { block: true, reason: "tool blocked" };
-      }
+      return runVerdict(ctx, event.toolCallId, verdict(toolFacts(toolName, input, m, m.label), axesFor(m)));
     }
 
     return undefined;

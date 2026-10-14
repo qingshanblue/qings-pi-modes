@@ -96,11 +96,11 @@ type Verdict =
 **不变量（每条都有属性测试）**：
 
 - **N0**：`protected` 永远 `block`。
-- **N1**：`privileged` 或 `escapesContainment` 或 `noContainment && 文件工具 outside-write` → 永远不是 `ai`/`allow`。
-- **N2**：`egress` 未覆盖的域名（且非 open）→ 永远不是 `allow`/`ai`。
+- **N1**：`privileged` 或 `escapesContainment` 或 `noContainment && 文件工具 outside-write` → 永远不是 `ai`；在**强制沙箱**下还永远不是 `allow`。无沙箱且策略显式 `allow`（如 `accept`）的提权命令保持用户选择的静默（实现时由属性测试确认的边界）。
+- **N2**：`egress` 未覆盖的域名（且非 open）→ 永远不是 `allow`/`ai`。该检查与沙箱状态无关：allowlist 是用户的出站策略，无沙箱时同样生效（实现时由属性测试确认）。
 - **N3**：`policy.deny` 不被任何授权（会话、永久、网络 grant）覆盖。
 - **N4**：`strict` 下 outside 永远 `block`。
-- **N5**：`ai` 仅出现在 `inspectable === true` 且 `hosts` 为空的调用上。
+- **N5**：无沙箱（或沙箱不可用）的 bash 调用若交给 `ai`，必须 `inspectable === true` 且 `hosts` 为空。沙箱内的调用由沙箱兜底，即使 payload 不透明也可交 AI（这是现行行为，属性测试按此约束）。
 - **N6**：`classifier` 关闭时 `ai` 永不出现。
 
 `route()` 是纯函数。`grants` 只是输入，授权的写入发生在 effects 层。
@@ -189,7 +189,30 @@ type Verdict =
 | 配置兼容 | 不改配置形状（仅内部重构）；若改，走 `defaults-history` |
 | 过度重构拖慢交付 | 每阶段可独立停止；P3 之后即可发布 1.4.0（网络 P4 可延后到 1.5.0） |
 
-## 6. 仍需你确认的开放问题（3 个）
+## 6. 决策记录（已按建议默认落地，2026-10-14）
+
+1. 网络未授权域名永远人工，不交 AI — **已实施**。
+2. `accept` 保留受保护路径的绕过（现状）— **保留**。
+3. 版本：P0–P6 整体为 **1.4.0**（P4 未拆出）— **已实施**（`v1.3.0` tag 为未发布的历史提交，保留不删）。
+
+## 6a. 实施状态与偏差（1.4.0）
+
+| 阶段 | 状态 | 说明 |
+|---|---|---|
+| P0 行为冻结 | 完成（形式不同） | 没有单独的 golden JSON。冻结的是现有 dispatcher 测试套件（`index.test.ts`，约 300 个场景，全程未改动预期）+ verdict 的属性矩阵。 |
+| P1 事实层 | 完成 | `facts.ts`：bash/file/web/tool 构造器，纯函数。 |
+| P2 纯路由 | 完成 | `verdict.ts`：N0–N6 属性测试覆盖约 7000 个 fact/axis 组合。 |
+| P3 接线 | 完成 | `tool_call` 的 bash/file/web/tool 全部经 `verdict()`；`autoDecide` 不再二次路由。 |
+| P4 网络 | 完成（部分） | 命令中显式 URL 的主机在执行前检查；运行时代理回调保持原样。`request_network_access` 工具仍自行提示，未经 verdict。 |
+| P5 配置 | 完成（形式不同） | `outsideWriteRoots` 通过 `facts` 的 in-bounds 进入，而不是 `Axes.writeGrants`。 |
+| P6 清理 | 完成 | 删除 `bash-plan.ts`、`file-gate.ts` 及其测试；`route.ts` 保留为 human/AI 规则。 |
+
+**属性测试中发现并修正的三处规则**（已反映在上面的 N1、N2、N5 中）：
+- N1：无沙箱且策略显式 `allow` 的提权命令保持静默（`accept` 的用户选择）；“永不 allow”只适用于强制沙箱。
+- N2：主机检查与沙箱状态无关；无 allowlist 时，无沙箱的命名主机仍交人工。
+- N5：只约束无沙箱的 AI 裁决；沙箱内的不透明 payload 仍可交 AI。
+
+## 6b. 原开放问题（已由 §6 回答）
 
 1. **网络命中非白名单 host 是否永远人工**（本规划：是，不交 AI）。若希望 AI 裁决"看起来无害"的 host，需接受外泄风险。
 2. **`accept` 模式是否仍绕过受保护路径**（现状：是，`bypassProtectedPaths`）。本规划保留现状，若要收紧请明确。
@@ -202,4 +225,4 @@ type Verdict =
 - [x] 阶段、验收、测试、风险确定（§3–§5）
 - [x] 命名冲突与开放问题列出（§0、§6）
 
-实施尚未开始。确认 §6 的三个问题后，从 P0 开始。
+P0–P6 已实施（见 §6a），版本 1.4.0。偏差与属性测试中修正的规则已记录。

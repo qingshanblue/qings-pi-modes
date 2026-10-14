@@ -1,6 +1,6 @@
 {
   "name": "qings-pi-modes",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "type": "module",
   "description": "Declarative, user-definable permission modes for the pi coding agent: OS-level sandboxing (bubblewrap / sandbox-exec), an allow/ask/deny policy engine, real bash AST gating (tree-sitter), tool hiding, and skill/custom-tool gating.",
   "license": "MIT",
