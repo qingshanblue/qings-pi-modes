@@ -3,8 +3,8 @@
  *
  * When an `ask` is granted "for session", the (mode, surface, target) is
  * remembered so the same action isn't re-prompted for the rest of the session.
- * The store is keyed per-mode (switching Build → Default → Build restores
- * Default's grants), session-lifetime only (never persisted to disk), and
+ * The store is keyed per-mode (switching edits → ask → edits restores the
+ * first mode's grants), session-lifetime only (never persisted to disk), and
  * cleared on session shutdown.
  *
  * The store is pure and unit-tested; `askWithSession` is the thin UI glue (a

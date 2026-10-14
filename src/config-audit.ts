@@ -71,13 +71,20 @@ export const sameValue = (a: unknown, b: unknown): boolean => JSON.stringify(a) 
 
 /**
  * Flatten a config into the leaves the audit compares: `defaultMode`,
- * `cycleOrder`, and per mode each direct field plus each key under `sandbox`
- * and `permission`. Only keys present in `raw` are yielded.
+ * `cycleOrder`, each child of the top-level `sandbox` / `network`, and per mode
+ * each direct field plus each key under `sandbox` and `permission`. Only keys
+ * present in `raw` are yielded.
  */
 export function configLeaves(raw: unknown): Map<string, unknown> {
   const out = new Map<string, unknown>();
   if (!isObject(raw)) return out;
   for (const k of ["defaultMode", "cycleOrder"]) if (k in raw) out.set(k, raw[k]);
+  // Top-level `sandbox` / `network` are shipped defaults too (the network
+  // allowlist in particular changes between versions): a user config that still
+  // holds an old one must be comparable against history (see auditStaleDefaults).
+  for (const k of ["sandbox", "network"]) {
+    if (isObject(raw[k])) for (const [k2, v2] of Object.entries(raw[k])) out.set(`${k}.${k2}`, v2);
+  }
   const modes = isObject(raw.modes) ? raw.modes : {};
   for (const [name, m] of Object.entries(modes)) {
     if (!isObject(m)) continue;

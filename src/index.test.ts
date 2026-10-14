@@ -1343,7 +1343,9 @@ test("automode: an allowed ask runs without prompting; status shows the classifi
   const h = await setup({ permFlag: "auto", modelRegistry: registry, model: { id: "m", provider: "p" } });
   try {
     assert.match(h.ctx.status, /^Auto /);
-    assert.match(h.ctx.status, /AI:inherit/);
+    // The harness runs --no-sandbox, so auto's classifier is degraded (it cannot
+    // gate unsandboxed bash) and the footer says so instead of the model chip.
+    assert.match(h.ctx.status, /AI:no-box/);
     const res = await h.call("write", { path: "src/app.ts", content: "x" });
     assert.equal(res, undefined); // allowed, not blocked
     assert.equal(h.ctx.prompts.length, 0); // never asked the human
@@ -1354,18 +1356,23 @@ test("automode: an allowed ask runs without prompting; status shows the classifi
   }
 });
 
-test("automode: an escape is never approved by the classifier — it goes to the human", { skip }, async () => {
-  // The classifier WOULD allow it; the prompt must still reach the human because
-  // approving an escape runs the command outside the sandbox.
+test("automode: an escape the sandbox cannot bound is never approved by the classifier", { skip }, async () => {
+  // The classifier WOULD allow these; the prompt must still reach the human
+  // because approving an escape runs the command outside the sandbox. When the
+  // sandbox is unavailable (--no-sandbox here) even a READ-ONLY outside read is
+  // not benign — `isBenignOutsideRead` requires an enforcing sandbox — so it is
+  // still the human's call, not the AI's.
   const registry = classifierRegistry(allowReply);
   const h = await setup({ permFlag: "auto", modelRegistry: registry, model: { id: "m", provider: "p" } });
   try {
-    h.ctx.answers.push("Deny");
-    const res = await h.call("bash", { command: "cat /etc/hostname" });
-    assert.equal(res?.block, true);
-    assert.equal(registry.calls.length, 0, "the classifier must not see an escape");
-    assert.equal(h.ctx.prompts.length, 1);
-    assert.match(h.ctx.prompts[0].title, /outside project|unsandboxed/i);
+    for (const command of ["cat /etc/hostname", "sudo rm -rf /", "echo hi > /etc/x"]) {
+      h.ctx.answers.push("Deny");
+      const res = await h.call("bash", { command });
+      assert.equal(res?.block, true, command);
+      assert.match(h.ctx.prompts.at(-1)?.title ?? "", /outside project|unsandboxed|privilege/i);
+    }
+    assert.equal(registry.calls.length, 0, "the classifier must not see an unbounded escape");
+    assert.equal(h.ctx.prompts.length, 3);
   } finally {
     h.cleanup();
   }

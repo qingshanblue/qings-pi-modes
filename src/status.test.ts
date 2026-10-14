@@ -70,3 +70,19 @@ test("updateStatus: the classifier AI token only appears in classifier modes", (
   updateStatus(c as never, mode(sb), ready, false, "AI:inherit", true, "on");
   assert.ok(!/AI/.test(c.status), "no AI token outside classifier modes");
 });
+
+test("updateStatus: a classifier mode without an enforcing sandbox shows AI:no-box", () => {
+  const sb = { enabled: true, writable: true };
+  // sandbox off
+  let c = ctx();
+  updateStatus(c as never, { ...mode({ enabled: false, writable: true }), classifier: true }, { ready: true, warn: undefined, disabled: false }, false, "AI:inherit", true, "off");
+  assert.equal(c.status, "Build box:off AI:no-box");
+  // sandbox on but unavailable
+  c = ctx();
+  updateStatus(c as never, { ...mode(sb), classifier: true }, { ready: false, warn: "nope", disabled: false }, false, "AI:inherit", true, "on");
+  assert.equal(c.status, "Build box:unavailable AI:no-box");
+  // verbose form explains why
+  c = ctx();
+  updateStatus(c as never, { ...mode(sb), classifier: true }, { ready: false, warn: "nope", disabled: false }, false, "AI:inherit", false, "on");
+  assert.match(c.status, /AI: without a sandbox, bash asks go to you/);
+});

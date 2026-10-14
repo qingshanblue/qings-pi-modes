@@ -48,10 +48,15 @@ test("normalizeClassifierConfig: defaults and overrides", () => {
 test("buildReviewPrompt: includes action fields and truncates long input", () => {
   const { systemPrompt, content } = buildReviewPrompt(subject({ isOutside: true }), 40);
   assert.match(systemPrompt, /security reviewer/i);
+  assert.match(systemPrompt, /ordinary development steps/i);
   assert.match(content, /mode: automode/);
   assert.match(content, /surface: bash/);
   assert.match(content, /outside project: yes/);
   assert.match(content, /targets: npm test/);
+  const withBounds = buildReviewPrompt(subject({ inBounds: ["/project", "/tmp/pi"] }), 40);
+  assert.match(withBounds.content, /in-bounds roots: \/project, \/tmp\/pi/);
+  const noBounds = buildReviewPrompt(subject(), 40);
+  assert.ok(!noBounds.content.includes("in-bounds roots"), "in-bounds line omitted when unknown");
   const long = buildReviewPrompt(subject({ input: { command: "x".repeat(500) } }), 40);
   assert.match(long.content, /truncated/);
 });
@@ -140,7 +145,7 @@ test("subjectKey: stable per action, differs by surface/input", () => {
   assert.notEqual(a, subjectKey(subject({ recentUserRequest: "unrelated request" }), "current"));
 });
 
-test("denial counter: streak resets on success, trips at the limit", () => {
+test("denial counter: per-surface streak, resets on success, trips at the limit", () => {
   let s = createDenialState();
   assert.equal(shouldFallbackToPrompting(s, 3), false);
   s = recordDenial(s);
@@ -151,4 +156,25 @@ test("denial counter: streak resets on success, trips at the limit", () => {
   assert.equal(shouldFallbackToPrompting(recordSuccess(s), 3), false);
   // 0 disables the fallback (never offer the human prompt)
   assert.equal(shouldFallbackToPrompting(recordDenial(createDenialState()), 0), false);
+});
+
+test("denial counter: denials are counted per surface", () => {
+  // Two bash denials and two write denials: neither surface is at 3, so no
+  // fallback — an unrelated write denial must not trip the bash threshold.
+  let s = createDenialState();
+  for (let i = 0; i < 2; i++) s = recordDenial(s, "bash");
+  for (let i = 0; i < 2; i++) s = recordDenial(s, "write");
+  assert.equal(shouldFallbackToPrompting(s, 3, "bash"), false);
+  assert.equal(shouldFallbackToPrompting(s, 3, "write"), false);
+  s = recordDenial(s, "bash");
+  assert.equal(shouldFallbackToPrompting(s, 3, "bash"), true);
+  assert.equal(shouldFallbackToPrompting(s, 3, "write"), false);
+  // Clearing bash's streak leaves the write streak intact.
+  const cleared = recordSuccess(s, "bash");
+  assert.equal(shouldFallbackToPrompting(cleared, 3, "bash"), false);
+  assert.equal(shouldFallbackToPrompting(cleared, 3, "write"), false);
+});
+
+test("DEFAULT_CLASSIFIER_CONFIG: 5 consecutive denials before human fallback", () => {
+  assert.equal(DEFAULT_CLASSIFIER_CONFIG.maxConsecutiveDenials, 5);
 });

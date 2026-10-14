@@ -77,6 +77,19 @@ test("defaultsChangedSince: leaf paths that differ between an old version and no
   assert.deepEqual(defaultsChangedSince("0.1.0", CURRENT, HISTORY), []); // unknown: nothing to say
 });
 
+test("configLeaves: top-level sandbox/network children are leaves", () => {
+  const leaves = configLeaves({ sandbox: { allowWrite: ["."], denyRead: ["~/.ssh"] }, network: { allowedDomains: ["a.com"] }, modes: {} });
+  assert.deepEqual([...leaves.keys()], ["sandbox.allowWrite", "sandbox.denyRead", "network.allowedDomains"]);
+});
+
+test("auditStaleDefaults: a stale top-level network allowlist is detected", () => {
+  const cur = { version: "2.0.0", defaults: { sandbox: { allowWrite: ["."] }, network: { allowedDomains: ["new.com"] } } };
+  const hist = [{ from: "1.0.0", to: "1.0.0", defaults: { sandbox: { allowWrite: ["."] }, network: { allowedDomains: ["old.com"] } } }];
+  const raw = { network: { allowedDomains: ["old.com"] } };
+  assert.deepEqual(auditStaleDefaults(raw, cur, hist).map((f) => f.path), ["network.allowedDomains"]);
+  assert.deepEqual(defaultsChangedSince("1.0.0", cur, hist), ["network.allowedDomains"]);
+});
+
 test("shipped data: history parses, covers 2.0.0 to 2.2.1, differs from the current defaults", () => {
   const history = loadDefaultsHistory();
   assert.ok(history.length >= 1);

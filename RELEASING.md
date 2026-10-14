@@ -43,12 +43,9 @@
 1. **元数据**
    - `package.json`：`version` 升号；
    - `author`：fork 后建议改为本人，把上游作者放进 `contributors`（保持 MIT 归属）；
-   - `pi.video`：当前指向上游 `wynainfo/pi-permission-modes` 的 2.1.0 demo 资源——**删除或替换为自己的**；
+   - `pi.image` / `pi.video`：`package.json` 目前未设置（如需画廊预览图/视频再自行添加）；
    - `repository` / `homepage` / `bugs` 已指向本 fork ✓。
-2. **README 安装段**：补上 npm 装法（当前只有 git 装法）：
-   ```bash
-   pi install npm:qings-pi-modes
-   ```
+2. **README 安装段**：已含 npm 装法（`pi install npm:qings-pi-modes`）✓；确认没有过时的版本号。
 3. **CHANGELOG**：把 `## [Unreleased]` 改为 `## [x.y.z] - YYYY-MM-DD`，并新起一个空的 `## [Unreleased]`。
 4. **LICENSE**：已含 fork 版权行 ✓（上游 MIT 版权保留）。
 
@@ -56,19 +53,19 @@
 
 ```bash
 npm run typecheck            # 应为干净
-npm test                     # 预期 270/272 通过（2 个 NixOS 环境性失败，见下）
+npm test                     # 预期 288 项 / 286 通过（2 个 NixOS 环境性失败，见下）
 npm pack --dry-run --json    # 校验打包内容
 ```
 
 `npm pack --dry-run` 期望值（2026-10-12 实测）：
 
-- 共 **32 个文件**：`src/*.ts`（无 `*.test.ts`）、`schemas/`、`permission-mode.defaults.json`、
+- 共 **33 个文件**：`src/*.ts`（无 `*.test.ts`）、`schemas/`、`permission-mode.defaults.json`、
   `defaults-history.json`、`README.md`、`LICENSE`、`CHANGELOG.md`、`CONTRIBUTING.md`、`SECURITY.md`、`package.json`；
 - 无 dotfile、无测试、无敏感文件；
-- 体积约 130 kB（解包 ~400 kB）。
+- 体积约 139 kB（解包 ~400 kB）。
 
-> 两个环境性失败（`blockablePath`、`bare-word symlink`）是 NixOS 下 coreutils 路径/symlink 解析导致的既有问题，
-> 与代码无关（在 `main` 分支上同样存在）。发布说明里如实注明即可。
+> 两个环境性失败（`blockablePath`@`src/paths.test.ts`、`bare-word symlink`@`src/index.test.ts`）是 NixOS 下
+> coreutils 路径/symlink 解析导致的既有问题，与代码无关（在 `main` 分支上同样存在）。发布说明里如实注明即可。
 
 ## 五、发布
 

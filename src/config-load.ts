@@ -2,7 +2,7 @@
  * Mode-config loading and layered merge.
  *
  * Layers, in order:
- *   1. permission-mode.defaults.json (shipped) — the four built-in modes, loaded
+ *   1. permission-mode.defaults.json (shipped) — the built-in modes, loaded
  *      over a minimal in-code fallback (FALLBACK_CONFIG).
  *   2. <agentDir>/permission-mode/permission-mode.json (global) — FULL authority:
  *      may add modes, redefine built-ins, and change defaultMode / cycleOrder.

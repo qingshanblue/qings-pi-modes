@@ -3,7 +3,7 @@
  *
  * A MODE is data: a named bundle of a sandbox profile, an allow/ask/deny
  * permission policy keyed by surface, plus UI metadata (label/color), an
- * optional system-prompt injection, and a hidden-tools list. The four built-in
+ * optional system-prompt injection, and a hidden-tools list. The built-in
  * modes ship in `permission-mode.defaults.json`; users override or extend them in
  * `permission-mode.json`.
  *
@@ -74,7 +74,6 @@ export const FILE_SURFACES: Surface[] = ["read", "write", "edit", "grep", "find"
  *  edits=mdLink(自动改文件) → auto=warning(AI 判定) → accept=error(无审批，最高风险). */
 export type ModeColor = "muted" | "mdLink" | "accent" | "error" | "warning" | "success";
 
-/** The runtime sandbox state: `off` (none), `on` (project-writable), `ro` (read-only). */
 /** The runtime sandbox state: `off` (no OS sandbox), `on` (outside write-blocked,
  *  outside reads allowed), `strict` (outside read AND write blocked at the
  *  policy layer — the OS cannot mask system reads without breaking the shell). */
@@ -82,7 +81,7 @@ export type SandboxState = "off" | "on" | "strict";
 
 /**
  * The OS-sandbox profile for a mode. `enabled:false` runs bash unsandboxed
- * (YOLO); `writable:false` confines bash to reads (Plan). The filesystem/network
+ * (an unsandboxed mode); `writable:false` confines bash to reads (Plan). The filesystem/network
  * fields feed @anthropic-ai/sandbox-runtime.
  *
  * As of the sandbox decoupling, the profile is normally the TOP-LEVEL
@@ -142,7 +141,7 @@ export interface ModeDef {
   /**
    * Skip the hard protected-path backstop (`.git`, `.env`, dotfiles) for file
    * tools. Defaults to false — the backstop applies in every mode unless a mode
-   * explicitly trusts everything. Only YOLO sets this true.
+   * explicitly trusts everything. Only a mode that opts in sets this true.
    */
   bypassProtectedPaths?: boolean;
   /**

@@ -47,10 +47,12 @@ you can rely on it appropriately.
   filter rather than containment. The OS sandbox state and the hard-deny paths
   remain the boundaries. `classifier.failClosed` defaults to `true`, so an
   error, timeout, or unparsable verdict blocks the action instead of falling
-  back to a prompt nobody may be present to answer. An escape — an
-  out-of-project path or privilege escalation, i.e. any ask that would run
-  the command outside the sandbox — is never handed to the classifier at
-  all: it always goes to the human prompt (denied in a headless session).
+  back to a prompt nobody may be present to answer. An ask that would run the
+  command OUTSIDE the sandbox — privilege escalation, a write escape, or any
+  ask while the sandbox is off/unavailable — is never handed to the classifier
+  at all: it always goes to the human prompt (denied in a headless session). A
+  READ-ONLY out-of-project access is not such an ask: the sandbox already
+  permits outside reads, so it stays sandboxed and is gated by the classifier.
 
 - **Reads are deny-listed, not allow-listed.** The sandbox blocks out-of-project
   *writes* at the kernel, but reads stay broad (so build tools work) except for
@@ -87,10 +89,12 @@ you can rely on it appropriately.
 - **File tools aren't OS-sandboxed.** `read`/`edit`/`write`/… are governed by the
   policy engine and path checks (out-of-project prompt, protected-path backstop,
   per-surface allow/ask/deny), not bubblewrap.
-- **Approved & non-sandboxing commands run unsandboxed.** Anything you confirm,
-  any approved out-of-project command, and everything in a mode with
-  `sandbox.enabled:false` (YOLO) runs with your full permissions. Treat them as
-  fully trusted.
+- **Approved escapes & non-sandboxing commands run unsandboxed.** A confirmed
+  escape (privilege escalation or a write out of the project), any ask while the
+  sandbox is off/unavailable, and everything in a mode with
+  `sandbox.enabled:false` runs with your full permissions - treat those as fully
+  trusted. A confirmed READ-ONLY out-of-project access is the exception: it
+  stays inside the sandbox (the sandbox already permits outside reads).
 - **Gating ≠ containment.** The AST/heuristic decides whether to *prompt* and
   whether an approved command runs *unsandboxed*. A missed detection is a missed
   prompt; in-project commands still run sandboxed, so the exposure is a missed
@@ -102,8 +106,9 @@ you can rely on it appropriately.
   reads. Opening an untrusted repo can't weaken your protection.
 - **Sandbox and policy are independent.** A mode with `sandbox.enabled:false`
   still honors its explicit bash policy. `bash:ask` prompts before an
-  unsandboxed command and `bash:deny` blocks it. YOLO runs silently because its
-  policy explicitly says `bash:allow`, not merely because containment is off.
+  unsandboxed command and `bash:deny` blocks it. An unsandboxed mode with
+  `bash:allow` runs silently because its policy explicitly says so, not merely
+  because containment is off.
 - **Network is a domain allowlist**, not traffic inspection - allowing a broad
   domain permits exfiltration to it. Keep the allowlist tight. Hosts outside
   the allowlist trigger a **live permission prompt** (deny-by-default: headless
@@ -124,11 +129,13 @@ you can rely on it appropriately.
   `PI_PERMISSION_MODE` and inherited by child `pi` processes (e.g. subagents),
   which adopt it on start. A spawner that overrides the child's environment breaks
   this; as a backstop, a **headless child with no forwarded mode starts in the
-  most restrictive mode, never YOLO** - with that mode's full policy but
-  *without* its system-prompt injection (a planning prompt would misdirect a
-  headless worker), and without re-exporting the fallback to its own children
-  (they derive the same fallback themselves). Don't rely on forwarding as a
-  security boundary - the child enforces its own modes regardless.
+  user's `defaultMode`** - with that mode's full policy but *without* its
+  system-prompt injection (a planning prompt would misdirect a headless worker),
+  and without re-exporting the fallback to its own children (they derive the
+  same fallback themselves). The OS sandbox state still defaults to `on` for
+  children, so even a permissive `defaultMode` runs confined. Don't rely on
+  forwarding as a security boundary - the child enforces its own modes
+  regardless.
 - **Sandbox-writable directories are in-bounds, and shared.** A path under the
   active profile's `allowWrite` (`/tmp/pi` by default), the session's scratch
   directory, or the runtime's own `/tmp/claude` is *not* treated as an escape:

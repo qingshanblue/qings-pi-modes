@@ -1,5 +1,5 @@
 /**
- * OS-level sandbox lifecycle for Build mode.
+ * OS-level sandbox lifecycle for the sandboxed modes.
  *
  * Wraps `@anthropic-ai/sandbox-runtime` (loaded lazily so a missing dependency
  * degrades gracefully instead of crashing) behind a small `SandboxController`
@@ -643,7 +643,7 @@ export class SandboxController {
 
   private async applyProfileNow(profile: SandboxProfile): Promise<void> {
     if (this.degraded || !this.manager) return;
-    if (!profile.enabled) return; // non-sandboxing mode (e.g. YOLO): keep prior init
+    if (!profile.enabled) return; // non-sandboxing mode (e.g. `sandbox.enabled:false`): keep prior init
 
     const cfg = withRuntimeExtras(profileToConfig(profile), this.extras);
     const key = JSON.stringify({ n: cfg.network, f: cfg.filesystem });

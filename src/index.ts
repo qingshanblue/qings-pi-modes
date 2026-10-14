@@ -2,19 +2,24 @@
  * Permission Mode extension
  *
  * Switchable, data-driven permission modes (cycle with alt+m or /permission). A MODE
- * is a JSON bundle of a sandbox profile + an allow/ask/deny permission policy +
- * UI metadata, defined in `schema.ts` (built-in defaults) and overridable in
- * `permission-mode.json`. The four shipped modes:
+ * is a JSON bundle of an allow/ask/deny permission policy + UI metadata, defined
+ * in `schema.ts` and shipped as data in `permission-mode.defaults.json`; users
+ * override or extend it in `permission-mode.json`. The three orthogonal axes:
  *
- *   Default - confirm bash/edit/write; approved in-project bash runs sandboxed
- *             (writable), approved out-of-project runs UNSANDBOXED.
- *   Plan    - planning mode. In-project bash runs sandboxed READ-ONLY; reads are
- *             free; only Markdown create/edit is allowed in-project. Out-of-project
- *             access prompts. A system prompt steers the model to write a plan file.
- *   Build   - in-project reads/writes/bash run without confirmation; bash runs
- *             sandboxed. Prompts on out-of-project access or privilege escalation;
- *             approved out-of-project commands run UNSANDBOXED.
- *   YOLO    - never prompts, never sandboxes; full user permissions.
+ *   mode    (alt+m) - WHO approves an `ask`: plan → ask → edits → auto → accept.
+ *   sandbox (alt+s) - the OS boundary (off / on / strict), only about out-of-project access.
+ *   network (alt+n) - a domain allowlist, toggled filtered ⇄ open for the session.
+ *
+ * The five shipped modes:
+ *   plan   - only Markdown may be created/edited; bash asks, read-only commands
+ *            run sandboxed read-only. A system prompt steers the model to write a
+ *            plan file and render it with show_plan.
+ *   ask    - every mutating operation asks the human.
+ *   edits  - in-project edit/write run without confirmation; bash still asks.
+ *   auto   - `ask` decisions go to the AI safety classifier (classifier.ts)
+ *            instead of the human; an ask that would run UNSANDBOXED always goes
+ *            to the human instead.
+ *   accept - never asks; still bounded by the sandbox state.
  *
  * The OS sandbox (@anthropic-ai/sandbox-runtime) is the real enforcement for
  * bash. If it's unavailable the sandboxed modes fall back to PROMPTING for
@@ -50,7 +55,7 @@ import path from "node:path";
 import { askWithSession, BlockedPaths, type ApprovalUI, type AskRequest, type DenyOption, ASK_LABELS, SessionApprovals } from "./approvals.ts";
 import { dualSelect, guardrailsPayload, type DualSelectUI, type GuardrailsKind } from "./remote-ask.ts";
 import { sandboxAwarenessPrompt } from "./awareness.ts";
-import { bashExecPlan, bashGate } from "./bash-enforce.ts";
+import { bashExecPlan, bashGate, isBenignOutsideRead } from "./bash-enforce.ts";
 import { analyzeBash, escapeTargetFromReason, escapingPaths } from "./bash-parse.ts";
 import { isSafeBashChain } from "./safe-command.ts";
 import {
@@ -131,7 +136,6 @@ interface AskReview {
   input: unknown;
   /** True when the target lies outside the project. */
   isOutside?: boolean;
-  /** True when approving would run bash UNSANDBOXED — never auto-approved. */
   /**
    * Set on every prompt that would run the command OUTSIDE the sandbox (an
    * escape/privilege ask, or any ask in a mode whose sandbox is off). Such an
@@ -357,9 +361,11 @@ export default async function (pi: ExtensionAPI) {
 
   /**
    * Ask the AI classifier about a pending `ask`, falling back to the human
-   * prompt per its policy. The classifier judges EVERY ask — including commands
-   * that will run unsandboxed: `auto` means the AI is the gate, and the sandbox
-   * state (ctrl+s) is what bounds execution, independently of who approves.
+   * prompt per its policy. The classifier judges in-sandbox asks only: any ask
+   * that would run the command OUTSIDE the sandbox (an escape, privilege
+   * escalation, or a mode with the sandbox off) short-circuits to the human
+   * below. `auto` means the AI is the gate — but only for what the sandbox still
+   * bounds.
    */
   const autoDecide = async (
     ctx: ExtensionContext,
@@ -398,6 +404,7 @@ export default async function (pi: ExtensionAPI) {
       input: review.input,
       cwd: ctx.cwd ?? root,
       isOutside: review.isOutside,
+      inBounds: sandboxAllowedRoots(root, effectiveSandbox(currentMode())),
       recentUserRequest: recentUserRequests(ctx),
     };
     const key = subjectKey(subject, cfg.model);
@@ -423,11 +430,11 @@ export default async function (pi: ExtensionAPI) {
       return humanPrompt();
     }
     if (verdict.allow) {
-      classifierDenials = recordSuccess(classifierDenials);
+      classifierDenials = recordSuccess(classifierDenials, surface);
       return true;
     }
-    classifierDenials = recordDenial(classifierDenials);
-    if (shouldFallbackToPrompting(classifierDenials, cfg.maxConsecutiveDenials)) {
+    classifierDenials = recordDenial(classifierDenials, surface);
+    if (shouldFallbackToPrompting(classifierDenials, cfg.maxConsecutiveDenials, surface)) {
       if (ctx.hasUI) ctx.ui.notify("permission-mode: classifier denied repeatedly; asking you", "warning");
       return humanPrompt();
     }
@@ -515,7 +522,7 @@ export default async function (pi: ExtensionAPI) {
     }
   };
 
-  // Unsandboxed runs (YOLO, approved escapes, degraded) get TMPDIR pointed at
+  // Unsandboxed runs (unsandboxed modes, approved escapes, degraded) get TMPDIR pointed at
   // the scratch dir via the spawn hook; sandboxed runs get it from the runtime
   // (CLAUDE_CODE_TMPDIR, set at session_start). Windows tools read TEMP/TMP.
   const localBash = createBashTool(root, {
@@ -655,11 +662,9 @@ export default async function (pi: ExtensionAPI) {
     }
   };
 
-  /** The most restrictive built-in-style mode for a headless child without a
-   * forwarded mode: a read-only sandboxed mode if any, else the default. */
   /**
    * The mode for a headless child without a forwarded mode: its defaultMode.
-   * The sandbox state independently defaults to `on` for children (and is
+   * The OS sandbox state independently defaults to `on` for children (and is
    * forwarded explicitly otherwise), so even a permissive default is confined.
    */
   const safeChildMode = (): string => config.defaultMode;
@@ -674,9 +679,9 @@ export default async function (pi: ExtensionAPI) {
    * Resolve which mode to start in:
    *   1. explicit --perm flag, then 2. persisted session entry (resume),
    *   3. PI_PERMISSION_MODE env (forwarded from a parent / user-set),
-   *   4. headless child with none of the above → most restrictive (never YOLO),
-   *      flagged as `fallback` (policy applies, systemPrompt is not injected),
-   *   5. the current/default mode.
+   *   4. headless child with none of the above → its defaultMode, flagged as
+   *      `fallback` (its policy applies, but its systemPrompt is not injected),
+   *   5. otherwise the current/default mode.
    */
   const pickMode = (ctx: ExtensionContext, useFlag: boolean): { name: string; fallback: boolean } => {
     let resolved: string | undefined;
@@ -1023,7 +1028,7 @@ export default async function (pi: ExtensionAPI) {
   });
 
   // Replace built-in bash so the sandbox can wrap it. Sandboxing is recomputed at
-  // run time from the active mode's profile: disabled (YOLO), approved escapes,
+  // run time from the active mode's profile: disabled (`sandbox.enabled:false`),
   // and the degraded fallback run unsandboxed; non-writable modes run read-only.
   pi.registerTool({
     ...localBash,
@@ -1054,7 +1059,7 @@ export default async function (pi: ExtensionAPI) {
   // sandbox allowlist (batch-capable, so one prompt covers an install that
   // needs several hosts). Grants land in the session state the ask callback
   // reads — no sandbox re-init. Available in every mode; when nothing filters
-  // (YOLO, degraded, /net open) it says so instead of prompting.
+  // (unsandboxed modes, degraded, /net open) it says so instead of prompting.
   pi.registerTool({
     name: "request_network_access",
     label: "Request network access",
@@ -1264,7 +1269,7 @@ export default async function (pi: ExtensionAPI) {
     if (!showPlanSucceeded(event.isError, event.result)) return;
     // Only a plan shown in a planning mode (the "@plan" prompt) is offered:
     // elsewhere show_plan is plain display, and a model must not be able to
-    // put "switch to Build" in front of the user from any mode it likes.
+    // put "switch to the approve mode" in front of the user from any mode it likes.
     if (currentMode().systemPrompt !== PLAN_PROMPT_SENTINEL) return;
     const planPath = shownPlanPath(event.result, requested);
     // The path ends up in a user-authored message: plain names only.
@@ -1345,7 +1350,7 @@ export default async function (pi: ExtensionAPI) {
     const bounds = sandboxAllowedRoots(root, effectiveSandbox(m));
 
     // Hard backstop: never write to protected paths (file tools aren't sandboxed),
-    // unless the mode explicitly trusts everything (YOLO). Matched lexically AND
+    // unless the mode explicitly trusts everything (a mode with `bypassProtectedPaths`). Matched lexically AND
     // on the symlink-resolved canonical path, so a link can't smuggle the write.
     if (!m.bypassProtectedPaths && (toolName === "edit" || toolName === "write") && inPath !== undefined) {
       if (isProtectedWrite(root, inPath)) {
@@ -1400,11 +1405,27 @@ export default async function (pi: ExtensionAPI) {
       // A command no layer matches falls back to "ask" (see decideBashChain).
       const action: Action =
         analysis.commands.length > 0 ? decideBashChain(m, analysis.commands) : decide(m, "bash", command);
+      const safeChain = isSafeBashChain(analysis.commands, command);
       // Tier 1 fast path: a known read-only command in-bounds runs without prompting
       // or classifier review (shared by Ask / Edits / Auto). Escapes never qualify.
-      if (action === "ask" && !analysis.outsideReason && isSafeBashChain(analysis.commands, command)) {
+      if (action === "ask" && !analysis.outsideReason && safeChain) {
         return undefined;
       }
+      // A read-only, non-privilege out-of-project access under a sandbox that WILL
+      // enforce is not a real escape (the sandbox already permits outside reads):
+      // keep it sandboxed and let the policy/classifier gate it — instead of
+      // escalating to a human and running it UNSANDBOXED once approved.
+      const benignOutsideRead = isBenignOutsideRead({
+        outsideReason: analysis.outsideReason,
+        safeChain,
+        usedFallback: analysis.usedFallback,
+        sandboxEnabled: modeSandbox(m).enabled,
+        sandboxState: effectiveSandboxState(m),
+        sandboxReady: sandbox.ready,
+      });
+      // `escape` drives the prompt/keys/targets below; the classifier still sees
+      // `isOutside` from the raw reason, so it can deny a secret read on its own.
+      const escape = Boolean(analysis.outsideReason) && !benignOutsideRead;
       const strict = effectiveSandboxState(m) === "strict";
       // In the `strict` sandbox state the boundary is hard: out-of-project access
       // is blocked outright (no prompt, no escape) — the OS cannot mask system
@@ -1415,7 +1436,13 @@ export default async function (pi: ExtensionAPI) {
           reason: `Sandbox strict: outside-project access is blocked (${analysis.outsideReason})`,
         };
       }
-      const gate = bashGate(action, analysis.outsideReason, modeSandbox(m).enabled, sandbox.ready);
+      const gate = bashGate(action, escape ? analysis.outsideReason : undefined, modeSandbox(m).enabled, sandbox.ready);
+      // A benign outside read still needs the prompt to say WHY; without the
+      // escape branch it would just read "Allow bash?". Make clear it stays
+      // sandboxed (unlike a real escape, which runs unsandboxed on approval).
+      if (benignOutsideRead && gate.kind === "prompt") {
+        gate.title = `Allow bash? (${analysis.outsideReason}; runs inside the sandbox)`;
+      }
       if (gate.kind === "block") return { block: true, reason: gate.reason };
       if (gate.kind === "prompt") {
         // Session approvals are keyed on the extracted command names, and ALL
@@ -1430,11 +1457,11 @@ export default async function (pi: ExtensionAPI) {
         // let `cat ~/.ssh/id_rsa` through silently, and an approved escape must
         // not cover a different one that merely shares its command name.
         const names = [...new Set(analysis.commands.map((c) => c.name).filter(Boolean))];
-        const keys = analysis.outsideReason ? [`escape:${command}`] : names.length > 0 ? names : [command];
+        const keys = escape ? [`escape:${command}`] : names.length > 0 ? names : [command];
         // Paths this command reaches outside the project (none for privilege
         // escalation). One already blocked this session: block outright, no
         // prompt. Otherwise the prompt offers "Deny and block".
-        const targets = analysis.outsideReason?.startsWith("path outside project")
+        const targets = escape && analysis.outsideReason?.startsWith("path outside project")
           ? analysis.usedFallback
             ? [escapeTargetFromReason(analysis.outsideReason, root)].filter((t): t is string => t !== undefined)
             : escapingPaths(analysis.commands, root, bounds)

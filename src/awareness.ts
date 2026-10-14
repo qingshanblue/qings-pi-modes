@@ -12,8 +12,10 @@
  * reachable, and how the prompt flow handles everything else.
  *
  * Tone matters: boundary-crossing commands (out-of-project paths, sudo) are
- * NOT discouraged — the policy layer prompts the user automatically and
- * approved commands run outside the sandbox. Only silent sandbox denials
+ * NOT discouraged — the policy layer prompts the user automatically. A
+ * read-only out-of-project access still runs INSIDE the sandbox (and, in a
+ * classifier mode, is judged by the AI); only a confirmed write escape or
+ * privilege escalation runs outside it. Silent sandbox denials
  * (non-allowlisted domains, undetected out-of-boundary writes) warrant
  * "ask the user" guidance.
  *
@@ -118,7 +120,7 @@ export function sandboxAwarenessPrompt(
   }
   lines.push(
     "- Background processes do not outlive the command: each bash call runs in its own sandbox that is torn down when the command exits, so `&`, `nohup`, and `setsid` cannot start anything long-running. Run long tasks in the foreground with an adequate timeout, or ask the user.",
-    "- Commands beyond these boundaries (out-of-project paths, sudo/doas) are fine to issue: the user is asked for permission automatically, and approved commands run outside the sandbox.",
+    "- Commands beyond these boundaries (out-of-project paths, sudo/doas) are fine to issue: the user is asked for permission automatically. A read-only out-of-project access still runs inside the sandbox; a write out of the project or a privilege escalation runs outside it once approved.",
     mode.bypassProtectedPaths
       ? "- File tools (read/edit/write/…) are policy-gated rather than OS-sandboxed."
       : "- File tools (read/edit/write/…) are policy-gated rather than OS-sandboxed; writes to protected paths (.git/, .env*, dotfiles) are blocked.",

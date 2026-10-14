@@ -35,7 +35,7 @@ export interface ClassifierConfig {
   timeoutMs: number;
   /** `true` (default): a classifier error blocks the action (fail closed). */
   failClosed: boolean;
-  /** Consecutive denials after which the human prompt is offered instead. */
+  /** Consecutive denials (per surface) after which the human prompt is offered instead. */
   maxConsecutiveDenials: number;
   /** Answer budget per call. */
   maxTokens: number;
@@ -48,7 +48,7 @@ export const DEFAULT_CLASSIFIER_CONFIG: ClassifierConfig = {
   model: "current",
   timeoutMs: 15000,
   failClosed: true,
-  maxConsecutiveDenials: 3,
+  maxConsecutiveDenials: 5,
   maxTokens: 700,
   maxInputChars: 4000,
 };
@@ -96,6 +96,10 @@ export interface ClassifierSubject {
   input: unknown;
   cwd: string;
   isOutside?: boolean;
+  /** In-bounds roots (project dir + the mode's sandbox-writable dirs): where the
+   * agent is expected to work, so the reviewer can tell routine edits from
+   * out-of-project ones. */
+  inBounds?: string[];
   /** The user's most recent request — the authorization context. Without it the
    * reviewer cannot tell a legitimate edit from a rogue one and over-denies. */
   recentUserRequest?: string;
@@ -116,7 +120,7 @@ const SYSTEM_PROMPT = [
   "- is destructive, irreversible, or clearly unrelated to the user's request.",
   "",
   "Allow routine, reversible, in-project work that matches the user's request —",
-  "the pending action is shown together with that request; an action that clearly\n  serves it should be allowed even if it edits project files.",
+  "the pending action is shown together with that request; an action that clearly\n  serves it should be allowed even if it edits project files. Lean toward\n  allowing ordinary development steps (build, test, lint, format, run the\n  project's own tooling, install a dependency already declared in a manifest,\n  git status/diff/log) — these are expected, not suspicious.",
   "When you are unsure, deny — a human can still approve it.",
   "",
   "Respond with ONLY a JSON object, no prose and no code fences:",
@@ -153,6 +157,7 @@ export function buildReviewPrompt(subject: ClassifierSubject, maxInputChars = DE
     `tool: ${subject.tool}`,
     `outside project: ${subject.isOutside ? "yes" : "no"}`,
   );
+  if (subject.inBounds && subject.inBounds.length > 0) lines.push(`in-bounds roots: ${subject.inBounds.join(", ")}`);
   if (subject.targets.length > 0) lines.push(`targets: ${subject.targets.join(", ")}`);
   lines.push("action input:", boundedInput(subject.input, maxInputChars));
   return { systemPrompt: SYSTEM_PROMPT, content: lines.join("\n") };
@@ -295,6 +300,7 @@ export function subjectKey(subject: ClassifierSubject, modelRef: string): string
         subject.targets.join("\u0000"),
         input,
         subject.isOutside ? "1" : "0",
+        (subject.inBounds ?? []).join("\u0000"),
         subject.recentUserRequest ?? "",
       ].join("\u0001"),
     )
@@ -337,15 +343,25 @@ export class VerdictCache {
 }
 
 export interface DenialState {
-  consecutive: number;
+  /** Consecutive denials per surface — an unrelated write denial must not push a
+   * bash command over the fallback threshold. */
+  bySurface: Record<string, number>;
 }
 
-export const createDenialState = (): DenialState => ({ consecutive: 0 });
+export const createDenialState = (): DenialState => ({ bySurface: {} });
 
-export const recordDenial = (s: DenialState): DenialState => ({ consecutive: s.consecutive + 1 });
+export const recordDenial = (s: DenialState, surface = ""): DenialState => ({
+  bySurface: { ...s.bySurface, [surface]: (s.bySurface[surface] ?? 0) + 1 },
+});
 
-export const recordSuccess = (_s: DenialState): DenialState => ({ consecutive: 0 });
+/** Clear the streak for THIS surface (an allow on bash must not clear a write streak). */
+export const recordSuccess = (s: DenialState, surface = ""): DenialState => {
+  if (s.bySurface[surface] === undefined) return s;
+  const bySurface = { ...s.bySurface };
+  delete bySurface[surface];
+  return { bySurface };
+};
 
-/** True when the denial streak is long enough that the human should decide. */
-export const shouldFallbackToPrompting = (s: DenialState, maxConsecutiveDenials: number): boolean =>
-  maxConsecutiveDenials > 0 && s.consecutive >= maxConsecutiveDenials;
+/** True when this surface's denial streak is long enough that the human should decide. */
+export const shouldFallbackToPrompting = (s: DenialState, maxConsecutiveDenials: number, surface = ""): boolean =>
+  maxConsecutiveDenials > 0 && (s.bySurface[surface] ?? 0) >= maxConsecutiveDenials;

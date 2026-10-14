@@ -4,7 +4,7 @@
  * A best-effort scan of a bash command string for privilege escalation and
  * out-of-project path tokens. This is NOT a real shell parser and can be fooled
  * (`bash -c '...'`, command substitution, variable-built paths). It drives the
- * Build-mode confirmation UX only; the OS sandbox is the real enforcement.
+ * bash prompt UX only; the OS sandbox is the real enforcement.
  *
  * Pure (no `pi`/`ctx`) so the known-gap behavior can be locked down with tests.
  */
@@ -45,12 +45,6 @@ export function pathPartOfToken(tok: string): string {
 }
 
 /**
- * Returns a human-readable reason to prompt before running `command`, or
- * undefined when the heuristic finds nothing concerning. `root` is the project
- * directory used to classify path tokens as in/out of project; `alsoInside`
- * lists further in-bounds roots (the sandbox-writable dirs, e.g. `/tmp`).
- */
-/**
  * The absolute path a (normalized) bash token names, or undefined when it
  * names none worth judging: absolute paths, `~`/`~/x`, anything with a `/`,
  * `..`, and - with `bare` - a plain word that is a SYMLINK in the project
@@ -71,6 +65,12 @@ export function tokenTarget(tok: string, root: string, bare: boolean): string | 
   }
 }
 
+/**
+ * Returns a human-readable reason to prompt before running `command`, or
+ * undefined when the heuristic finds nothing concerning. `root` is the project
+ * directory used to classify path tokens as in/out of project; `alsoInside`
+ * lists further in-bounds roots (the sandbox-writable dirs, e.g. `/tmp`).
+ */
 export function bashConfirmReason(command: string, root: string, alsoInside: readonly string[] = []): string | undefined {
   if (PRIVILEGE_RE.test(command)) return "privilege escalation";
   if (/(^|[;&|(]\s*)(cd|pushd)(\s+-)?\s*($|[;&|)])/.test(command)) return "path outside project: cd";

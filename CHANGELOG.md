@@ -4,6 +4,40 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## qings-pi-modes 1.1.0 — 2026-10-14
+
+Fewer manual approvals in `auto` (via a safer escape path), a wider default
+network allowlist, and a per-surface classifier fallback.
+
+### Changed
+- **Read-only out-of-project bash no longer reaches the human.** A read-only
+  command line (Tier-1 whitelist; no redirect or command substitution) whose only
+  concern is a path outside the project now runs **inside** the sandbox and is
+  gated by the policy/classifier, instead of prompting the human and then running
+  **unsandboxed** once approved. The sandbox already permits out-of-project
+  *reads* (only `denyRead` secrets are masked), so this saves an approval and a
+  privilege at once. Privilege escalation, write escapes, `strict`, and a sandbox
+  that is `off`/unavailable still always go to the human.
+- **Wider default network allowlist.** The shipped allowlist now also covers the
+  Rust (`crates.io`), Go (`proxy.golang.org`, `sum.golang.org`), Ruby
+  (`rubygems.org`), Python file CDN (`files.pythonhosted.org`) and Maven
+  (`repo.maven.apache.org`, `repo1.maven.org`) registries, not just npm / PyPI /
+  GitHub.
+- **Classifier fallback is per-surface and less twitchy.** `maxConsecutiveDenials`
+  default rose from 3 to 5, and denials are counted per surface — a write denial
+  no longer pushes an unrelated bash command over the threshold. An allow clears
+  only its own surface's streak.
+- The classifier prompt now leans toward allowing routine development steps
+  (build, test, lint, format, declared-dependency installs) and receives the
+  in-bounds roots, so it can tell routine edits from out-of-project ones.
+
+### Fixed
+- The defaults audit now compares top-level `sandbox` / `network` leaves, so a
+  global config whose network allowlist is outdated is no longer silently
+  ignored.
+- The comment on the `auto` classifier's escape handling no longer claims it
+  judges commands that will run unsandboxed (those always go to the human).
+
 ## qings-pi-modes 1.0.0 — 2026-10-12
 
 First release of **qings-pi-modes**, a fork of

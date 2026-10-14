@@ -32,7 +32,7 @@ bash 门控使用真正的 **tree-sitter AST**（不是正则），OS 沙箱由
 pi install npm:qings-pi-modes
 ```
 
-- `pi install npm:qings-pi-modes@1.0.0` —— 锁定版本（`pi update` 不会越过它）
+- `pi install npm:qings-pi-modes@1.1.0` —— 锁定版本（`pi update` 不会越过它）
 - `pi install -l npm:qings-pi-modes` —— 项目级安装（`.pi/` 内，可与团队共享）
 - `pi -e npm:qings-pi-modes` —— 不写入配置，单次试用
 
@@ -44,7 +44,7 @@ pi install git:github.com/qingshanblue/qings-pi-modes
 
 `pi install` 会自动执行 `npm install`（带入 `@anthropic-ai/sandbox-runtime`、tree-sitter 等运行时依赖）；pi SDK 作为 peer dependency 由宿主提供。两种来源通用：
 
-- `pi install git:github.com/qingshanblue/qings-pi-modes@v1.0.0` —— 按 tag 锁定
+- `pi install git:github.com/qingshanblue/qings-pi-modes@v1.1.0` —— 按 tag 锁定
 - `pi update --extensions` —— 之后拉取更新
 - `pi list` / `pi remove <source>` —— 查看 / 卸载
 
@@ -101,7 +101,7 @@ sudo apt install -y bubblewrap socat ripgrep
 | **plan** `⏸` | 规划模式。读免费；**只有 Markdown**（`*.md`/`*.markdown`）能在项目内创建/编辑，其它 `edit`/`write` 阻止。变更类 `bash` 会**弹窗询问**（只读命令走白名单免问）。系统提示引导模型：把计划写到 `plan/<YYYY-MM-DD>_<描述>.md`，用 **`show_plan`** 渲染给你审，然后交接：出现 **Accept / Decline** 卡片（见[批准计划](#批准一个计划)）。 |
 | **ask** `●` | 每个变更类操作都问你：`bash`/`edit`/`write`/web 搜索/扩展工具。读免费；白名单内的只读 bash 免问。批准的项目内 `bash` 在**沙箱内**运行。 |
 | **edits** `✎` | 项目内 `edit`/`write` **不再确认**（= Claude Code 的 accept-edits）；`bash` 仍逐条询问。项目内 `bash` 在**沙箱内**运行。 |
-| **auto** `▶` | 读免费；`bash`/`edit`/`write`、越界访问、web 搜索、扩展工具交给 **AI 安全分类器**判定而非逐条问你（见 [AI auto 模式](#ai-auto-模式)）。在**沙箱内**运行。 |
+| **auto** `▶` | 读免费；`bash`/`edit`/`write`、只读越界访问、web 搜索、扩展工具交给 **AI 安全分类器**判定而非逐条问你（见 [AI auto 模式](#ai-auto-模式)）。在**沙箱内**运行；会脱离沙箱的逃逸（写越界 / 提权）仍走人工。 |
 | **accept** `⚡` | **从不询问**（自动接受所有策略决定）——但仍**受沙箱边界约束**：`alt+m` 决定它能触达什么。无保护路径兜底。 |
 
 - 循环顺序 = 权限从低到高：`plan → ask → edits → auto → accept`。
@@ -114,7 +114,7 @@ sudo apt install -y bubblewrap socat ripgrep
 | 档 | 外路径读 | 外路径写 | 项目内 | 越界处理 |
 |---|---|---|---|---|
 | **off** | ✅ | ✅ | 原样 | 不做逃逸检测（审批策略仍然生效）|
-| **on**（默认）| ✅ | ⛔ OS 拦 | 原样 | **弹窗**（批准后该命令脱离沙箱执行）|
+| **on**（默认）| ✅ | ⛔ OS 拦 | 原样 | 只读越界：仍在沙箱内，交策略/分类器；写越界/提权：**弹窗**（批准后脱离沙箱执行）|
 | **strict** | ⛔ | ⛔ | 原样 | **直接 block**，不弹窗（见下）|
 
 - `strict` 的「外读也拦」由**策略层**实现（dispatcher 对越界访问直接拒绝）——
@@ -196,7 +196,8 @@ touch，长会话不会被并发会话清扫掉。base 下的文件与符号链�
 
 ## 网络
 
-沙箱开启的模式里，bash 的网络流量按**域名 allowlist** 过滤（默认：npm/pypi/GitHub）。
+沙箱开启的模式里，bash 的网络流量按**域名 allowlist** 过滤（默认：npm、PyPI 及其文件 CDN、
+GitHub，以及 Rust/Go/Ruby/Maven 的包注册表）。
 这不是一堵静默的墙——访问 allowlist 之外的主机时**会暂停并询问你**
 （*Allow for session / Allow forever / Deny*），然后放行或失败：
 
@@ -226,8 +227,8 @@ Claude Code auto mode 的形态。它是唯一带 `"classifier": true` 的内置
 硬拦     保护路径 / 策略 deny            → 直接 block（AI 看不到）
 Tier 0   permission.allow 规则           → 放行
 Tier 1   只读命令白名单（内置）           → 放行（无重定向/命令替换才合格）
-Tier 2   其余 ask                        → 模型审批
-旁路     逃逸（越界路径/提权）            → **始终人工**（LLM 不得授予无沙箱执行；strict 沙箱态下直接 block）
+Tier 2   其余 ask（含只读越界读）        → 模型审批（命令仍在沙箱内执行）
+旁路     会脱离沙箱的逃逸（提权 / 写越界 / 沙箱 off·不可用）→ **始终人工**（LLM 不得授予无沙箱执行；strict 沙箱态下直接 block）
 ```
 
 - 分类器**进程内**运行，走 pi 的模型层（`ctx.modelRegistry`），复用你真实的
@@ -247,13 +248,17 @@ Tier 2   其余 ask                        → 模型审批
   用策略规则再放开（如 `"bash": { "sed -n*": "allow" }`）。
 - **fail-closed 默认**：分类器出错/超时/返回不可解析 → **该操作被拦**。全局配置
   `"classifier": { "failClosed": false }` 可改为降级人工弹窗。
-- **逃逸永不交给分类器**：越界路径/提权，以及任何会以「无沙箱」方式执行的 ask，一律走人工确认
-  （headless 下即拒绝）——最危险的授权不给 LLM。
+- **逃逸永不交给分类器**：提权、写越界，以及任何会以「无沙箱」方式执行的 ask（含沙箱 `off`/
+  不可用），一律走人工确认（headless 下即拒绝）——最危险的授权不给 LLM。
+- **只读的项目外访问不再弹人工**：只读命令（Tier-1 白名单、无重定向/命令替换）读项目外时，
+  仍在**沙箱内**执行、交策略/分类器判定，而不是走「批准后无沙箱运行」。沙箱本来就允许项目外
+  只读（仅屏蔽 `denyRead` 秘密），因此这既省一次人工、又少一次特权。
 - **它是启发式审查，不是安全边界**：审查文本里含模型写的命令与参数，理论上可被诱导；
   不可解析的回复一律按拒绝处理，但仍请把 `classifier: true` 的模式当作便利过滤器——
   真正的边界是沙箱态（`alt+s`）与硬拦规则（详见 SECURITY.md）。
-- 连续拒绝达 `classifier.maxConsecutiveDenials`（默认 3）→ 转人工一次，避免卡死。
-- footer 显示 `AI:current-model`（或 `AI:<模型>`）。
+- 连续拒绝达 `classifier.maxConsecutiveDenials`（默认 5）→ 转人工一次，避免卡死；拒绝**按
+  surface 分别计数**（一次写拒绝不会把无关的 bash 命令推过阈值），一次 allow 清零该 surface。
+- footer 显示 `AI:current-model`（或 `AI:<模型>`）；分类器模式但沙箱未生效时显示 **`AI:no-box`**——AI 无法为无沙箱 bash 把关，这类 `ask` 会转人工。
 
 全局 `permission-mode.json` 中的分类器配置：
 
@@ -264,7 +269,7 @@ Tier 2   其余 ask                        → 模型审批
     "model": "current",
     "timeoutMs": 15000,
     "failClosed": true,
-    "maxConsecutiveDenials": 3
+    "maxConsecutiveDenials": 5
   }
 }
 ```
@@ -333,7 +338,7 @@ Tier 2   其余 ask                        → 模型审批
 2. **OS 沙箱**（`@anthropic-ai/sandbox-runtime`）：bash 的真正执行约束。模式沙箱
    开启时，项目内 bash 被 `sandbox-exec`（macOS）/ `bubblewrap`（Linux）包装，
    **写**被限制在 `allowWrite`（项目 + `/tmp/pi` + 会话 scratch 目录）内，
-   `denyRead` 的密钥路径读起来像不存在——无论命令写了什么。`ctrl+s` 的状态
+   `denyRead` 的密钥路径读起来像不存在——无论命令写了什么。`alt+s` 的状态
    决定哪些模式跑在沙箱里（`off` = 不沙箱）；`strict` 额外在策略层拒绝一切越界访问。
 
 所以：策略说 `allow` 的 `bash` 仍在**沙箱内**运行；`ask` 弹窗后沙箱内执行——
@@ -402,7 +407,7 @@ Tier 2   其余 ask                        → 模型审批
   "defaultMode": "ask",
   "cycleOrder": ["plan", "ask", "edits", "auto", "accept"],
   "sandbox": {                         // 共享 OS 沙箱 profile（一处定义；仅全局）
-    "allowWrite": [".", "/tmp/pi"],    // ctrl+s 的三态围绕这份 profile 切换启停
+    "allowWrite": [".", "/tmp/pi"],    // alt+s 的三态围绕这份 profile 切换启停
     "denyRead": ["~/.ssh", "~/.aws", "~/.gnupg"],
     "allowRead": [],                   // 在 denyRead 内重新可读（见下方"Strict home"）
     "denyWrite": []
@@ -544,7 +549,7 @@ Tier 2   其余 ask                        → 模型审批
   automode/yolo 重命名并重定界；`edits` = accept-edits，`accept` 不再强制关沙箱）；
 - **新增 `auto` 的 AI 分类器**（`safe-command.ts` 只读白名单 + 用户请求上下文 +
   fail-closed + 连续拒绝转人工）；
-- **沙箱解耦为独立三态**（`off/on/strict`，`ctrl+s`），profile 上提为顶层共享块；
+- **沙箱解耦为独立三态**（`off/on/strict`，`alt+s`），profile 上提为顶层共享块；
   新增顶层 `network` 块与 `statusFormat`；
 - **分类器可见用户请求**（修复无上下文导致的误拦）；
 - 切换不再弹通知，footer 状态条为唯一事实来源（token 化 + 三态配色）；

@@ -2,6 +2,10 @@
 
 > 2026-10-11 · qings-pi-modes（fork of wynainfo/pi-permission-modes）
 > 状态：**已实现**（P1–P4，分支 `feat/sandbox-decouple`）
+>
+> ⚠️ 设计记录，非现状说明。部分细节已过时：快捷键最终只用 `alt+m / alt+s / alt+n`
+> （下文 `ctrl+*` 未采用）；「逃逸永不交给分类器」（commit 3648298）已取代文中
+> 「auto：bash 逃逸→AI」。现状以 `README.md` / `SECURITY.md` 为准。
 
 ## 0. 最终形态：三条正交轴
 

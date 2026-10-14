@@ -14,7 +14,7 @@
  *                      read-only?), recomputed at run time from the active mode.
  */
 
-import type { Action } from "./schema.ts";
+import type { Action, SandboxState } from "./schema.ts";
 
 export type BashGateKind = "allow" | "prompt" | "block";
 
@@ -63,8 +63,8 @@ export function bashGate(
   // A hard deny blocks regardless of sandbox state.
   if (action === "deny") return gate("block", "", "bash command denied by policy", false);
 
-  // Disabling containment must not silently disable the policy layer. YOLO
-  // still passes here because its explicit bash policy resolves to `allow`;
+  // Disabling containment must not silently disable the policy layer. An
+  // unsandboxed mode with an explicit `allow` policy still passes here;
   // a custom unsandboxed mode with `ask` continues to require confirmation.
   if (!sandboxEnabled) {
     if (action === "ask") {
@@ -83,6 +83,49 @@ export function bashGate(
   // In-project, sandbox ready: the policy action drives it.
   if (action === "ask") return gate("prompt", "Allow bash?", "bash blocked", false);
   return gate("allow", "", "", false);
+}
+
+export interface BenignOutsideReadInput {
+  /** The escape/privilege reason from the AST analysis, if any. */
+  outsideReason: string | undefined;
+  /** The whole chain is a known read-only command line (`isSafeBashChain`). */
+  safeChain: boolean;
+  /** The AST parse failed, so the reason came from the heuristic fallback. */
+  usedFallback: boolean;
+  /** The active mode's `sandbox.enabled`. */
+  sandboxEnabled: boolean;
+  /** The effective per-session sandbox state. */
+  sandboxState: SandboxState;
+  /** Whether the OS sandbox is initialized and usable. */
+  sandboxReady: boolean;
+}
+
+/**
+ * Whether an out-of-project bash ask is a *benign read*: a read-only chain
+ * (Tier-1 safe — no redirect, no substitution) whose only concern is a PATH
+ * outside the project, under a sandbox that will actually enforce (state `on`,
+ * runtime ready, AST parsed).
+ *
+ * Such an access is not a real escape: the OS sandbox already permits
+ * out-of-project READS (only `denyRead` secrets are masked), so running it
+ * inside the sandbox grants nothing the sandbox would not have — whereas the
+ * escape path runs it UNSANDBOXED once approved. Treating it as in-bounds lets
+ * the policy/classifier gate it while execution stays sandboxed.
+ *
+ * Never true for privilege escalation, `strict` (which blocks all outside
+ * access outright), a disabled/unavailable/fallback sandbox, or a chain that
+ * can write (`>`/backtick) or execute (a command outside the read-only list).
+ */
+export function isBenignOutsideRead(i: BenignOutsideReadInput): boolean {
+  return (
+    i.sandboxEnabled &&
+    i.sandboxState === "on" &&
+    i.sandboxReady &&
+    !i.usedFallback &&
+    i.safeChain &&
+    i.outsideReason !== undefined &&
+    i.outsideReason.startsWith("path outside project")
+  );
 }
 
 export interface BashExecPlan {

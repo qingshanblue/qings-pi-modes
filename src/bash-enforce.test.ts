@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { type BashGate, bashExecPlan, bashGate } from "./bash-enforce.ts";
+import { type BashGate, bashExecPlan, bashGate, isBenignOutsideRead } from "./bash-enforce.ts";
 
 const OUTSIDE = "path outside project: /etc/passwd";
 
@@ -58,4 +58,30 @@ test("bashExecPlan: sandboxed iff enabled & ready & not escaped; readOnly iff no
   assert.equal(bashExecPlan(true, true, true, true).sandboxed, false);
   // Sandbox down → unsandboxed.
   assert.equal(bashExecPlan(true, true, false, false).sandboxed, false);
+});
+
+test("isBenignOutsideRead: only a read-only path escape under an enforcing sandbox", () => {
+  const base = {
+    outsideReason: OUTSIDE,
+    safeChain: true,
+    usedFallback: false,
+    sandboxEnabled: true,
+    sandboxState: "on" as const,
+    sandboxReady: true,
+  };
+  assert.equal(isBenignOutsideRead(base), true);
+  // A privilege escalation is never benign — it must stay on the human path.
+  assert.equal(isBenignOutsideRead({ ...base, outsideReason: "privilege escalation" }), false);
+  // Nothing concerning to begin with.
+  assert.equal(isBenignOutsideRead({ ...base, outsideReason: undefined }), false);
+  // The sandbox would not actually enforce (off / strict / unavailable): keep the
+  // conservative escape path so nothing runs unsandboxed.
+  assert.equal(isBenignOutsideRead({ ...base, sandboxState: "off" }), false);
+  assert.equal(isBenignOutsideRead({ ...base, sandboxState: "strict" }), false);
+  assert.equal(isBenignOutsideRead({ ...base, sandboxEnabled: false }), false);
+  assert.equal(isBenignOutsideRead({ ...base, sandboxReady: false }), false);
+  // Only a VERIFIED read-only chain qualifies: without an AST (fallback) or with
+  // a write/exec-capable command it is not a benign read.
+  assert.equal(isBenignOutsideRead({ ...base, safeChain: false }), false);
+  assert.equal(isBenignOutsideRead({ ...base, usedFallback: true }), false);
 });

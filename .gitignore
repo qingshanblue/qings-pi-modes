@@ -10,8 +10,7 @@ sandbox.json
 *.log
 .DS_Store
 
-# Demo videos: the gallery video is hosted as a GitHub release asset
-# (package.json pi.video), not in the repo
+# Demo videos: hosted as GitHub release assets, not in the repo
 *.mp4
 
 # Private security reports / patch files (never commit — may contain

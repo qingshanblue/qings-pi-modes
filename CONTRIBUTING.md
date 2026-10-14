@@ -50,6 +50,13 @@ Node 22, and **typecheck is blocking**.
 | `sandbox.ts` | `SandboxController` - runtime lifecycle, per-mode profile, placeholder cleanup |
 | `show-plan.ts` / `plan-render.ts` | `show_plan` tool + its (testable) renderer |
 | `status.ts` | Footer indicator |
+| `classifier.ts` | AI safety classifier (prompt / verdict / denial state) for `classifier: true` modes |
+| `network.ts` | Live network session state (grants, denies, open toggle) for the proxy ask callback |
+| `remote-ask.ts` | Dual-surface approval prompts (terminal overlay + Telegram card) |
+| `awareness.ts` | Sandbox-boundary system-prompt section injected each turn |
+| `scratch.ts` | Session scratch directory (create / sweep / in-bounds) |
+| `plan-approval.ts` | One-step plan approval state (restore, message, hash) |
+| `safe-command.ts` | Tier-1 read-only bash whitelist |
 | `modes.ts` | Persisted session state (`PermState`) |
 | `util.ts` | Tiny SDK-free helpers |
 
@@ -64,14 +71,19 @@ session start (see `config-audit.ts`). Whenever you change a value in it:
    version is the release *before* the one carrying your change.
 2. Mention the change in the CHANGELOG; users with a stale copy will be told
    the field name and both values automatically.
+3. Bump `package.json` `version`. `defaultsFor` short-circuits when the running
+   version equals the current one, so the appended range must end strictly
+   before the new version (e.g. append `1.0.0`–`1.0.0` when releasing `1.1.0`).
 
 The `config-audit.test.ts` suite fails if a history entry equals the current
 defaults, which catches a forgotten step 1.
 
 ## Conventions
 
-- **Keep decision logic pure and SDK-free** (`resolve`, `config-load`, `paths`,
-  `bash-enforce`, `heuristics`, `approvals`, `util`, `plan-render`) so it's
+- **Keep decision logic pure and SDK-free** (`resolve`, `config-load`,
+  `config-audit`, `paths`, `bash-enforce`, `bash-parse`, `heuristics`,
+  `safe-command`, `approvals`, `network`, `classifier`, `scratch`, `awareness`,
+  `plan-render`, `plan-approval`, `util`) so it's
   unit-testable with plain `node --test`. SDK imports in those modules must be
   **type-only**.
 - The extension loads via jiti - relative imports use explicit `.ts` extensions.

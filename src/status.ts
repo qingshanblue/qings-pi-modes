@@ -11,6 +11,9 @@
  *   net:limit | free     (the domain-allowlist toggle — alt+n; only while the
  *                         sandbox is enforcing; the NETWORK itself is never off)
  *   AI:inherit | AI:<model>   (only in classifier modes)
+ *   AI:no-box                 (classifier mode but the sandbox is off/unavailable:
+ *                              the AI cannot gate unsandboxed bash, so those asks
+ *                              come to you)
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -34,6 +37,10 @@ export function updateStatus(
   const enforcing = sb.enabled && sandbox.ready;
   const netEnabled = enforcing && networkFiltered(sb);
   const degraded = sb.enabled && !!sandbox.warn && !sandbox.disabled;
+  // A classifier mode whose sandbox is not enforcing: the AI can still review
+  // file/extension tools, but every bash ask will run unsandboxed once approved,
+  // so it is escalated to the human. Surface that instead of the model chip.
+  const aiDegraded = !!mode.classifier && !enforcing;
 
   if (compact) {
     // 颜色即语义（风险/保护梯度）：
@@ -47,7 +54,10 @@ export function updateStatus(
     let status = t.fg(mode.color, mode.label);
     status += sep + t.fg(sbColor, `box:${sbx}`);
     if (netEnabled) status += sep + (networkOpen ? t.fg("success", "net:free") : t.fg("warning", "net:limit"));
-    if (mode.classifier && classifierLabel) status += sep + classifierLabel;
+    if (mode.classifier) {
+      if (aiDegraded) status += sep + t.fg("error", "AI:no-box");
+      else if (classifierLabel) status += sep + classifierLabel;
+    }
     ctx.ui.setStatus("perm", status);
     return;
   }
@@ -63,6 +73,9 @@ export function updateStatus(
   } else {
     status += "  " + t.fg("dim", "Network: open");
   }
-  if (classifierLabel && mode.classifier) status += "  " + t.fg(mode.color, classifierLabel);
+  if (mode.classifier) {
+    if (aiDegraded) status += "  " + t.fg("error", "AI: without a sandbox, bash asks go to you");
+    else if (classifierLabel) status += "  " + t.fg(mode.color, classifierLabel);
+  }
   ctx.ui.setStatus("perm", status);
 }
