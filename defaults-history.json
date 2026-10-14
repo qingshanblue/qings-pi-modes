@@ -765,5 +765,198 @@
         }
       }
     }
+  },
+  {
+    "from": "1.2.0",
+    "to": "1.2.0",
+    "defaults": {
+      "defaultMode": "ask",
+      "cycleOrder": [
+        "plan",
+        "ask",
+        "edits",
+        "auto",
+        "accept"
+      ],
+      "sandbox": {
+        "enabled": true,
+        "writable": true,
+        "allowWrite": [
+          ".",
+          "/tmp/pi"
+        ],
+        "denyWrite": [],
+        "denyRead": [
+          "~/.ssh",
+          "~/.aws",
+          "~/.gnupg",
+          "~/.netrc",
+          "~/.git-credentials",
+          "~/.pypirc",
+          "~/.gem/credentials",
+          "~/.vault-token",
+          "~/.password-store",
+          "~/.pi/agent/auth.json",
+          "~/.pi/agent/oauth.json"
+        ]
+      },
+      "network": {
+        "allowedDomains": [
+          "npmjs.org",
+          "*.npmjs.org",
+          "registry.npmjs.org",
+          "registry.yarnpkg.com",
+          "pypi.org",
+          "*.pypi.org",
+          "files.pythonhosted.org",
+          "crates.io",
+          "*.crates.io",
+          "rubygems.org",
+          "*.rubygems.org",
+          "proxy.golang.org",
+          "sum.golang.org",
+          "repo.maven.apache.org",
+          "repo1.maven.org",
+          "github.com",
+          "*.github.com",
+          "api.github.com",
+          "raw.githubusercontent.com",
+          "*.githubusercontent.com",
+          "cache.nixos.org",
+          "nixos.org"
+        ],
+        "deniedDomains": []
+      },
+      "modes": {
+        "ask": {
+          "label": "Ask",
+          "color": "success",
+          "permission": {
+            "path": {
+              "*": "allow"
+            },
+            "external_directory": "ask",
+            "read": "allow",
+            "grep": "allow",
+            "find": "allow",
+            "ls": "allow",
+            "write": "ask",
+            "edit": "ask",
+            "bash": {
+              "*": "ask"
+            },
+            "web_search": "ask",
+            "tool": "ask",
+            "skill": "ask"
+          }
+        },
+        "plan": {
+          "label": "Plan",
+          "color": "muted",
+          "systemPrompt": "@plan",
+          "permission": {
+            "path": {
+              "*": "allow"
+            },
+            "external_directory": "ask",
+            "read": "allow",
+            "grep": "allow",
+            "find": "allow",
+            "ls": "allow",
+            "write": {
+              "*": "deny",
+              "*.md": "allow",
+              "*.markdown": "allow"
+            },
+            "edit": {
+              "*": "deny",
+              "*.md": "allow",
+              "*.markdown": "allow"
+            },
+            "bash": {
+              "*": "ask"
+            },
+            "web_search": "allow",
+            "tool": "ask",
+            "skill": "ask"
+          }
+        },
+        "auto": {
+          "label": "Auto",
+          "color": "warning",
+          "classifier": true,
+          "systemPrompt": "Auto mode is active: file writes/edits, common build/test commands, web search and skills run automatically; other bash commands are reviewed by an AI safety classifier, and anything that would escape the sandbox (privilege escalation, writes outside the project) is escalated to the human. Keep actions scoped to the project, reversible, and aligned with the request; secret access, privilege escalation, and data exfiltration are blocked.",
+          "permission": {
+            "path": {
+              "*": "allow"
+            },
+            "external_directory": "ask",
+            "read": "allow",
+            "grep": "allow",
+            "find": "allow",
+            "ls": "allow",
+            "write": "allow",
+            "edit": "allow",
+            "bash": {
+              "*": "ask",
+              "npm run *": "allow",
+              "npm test*": "allow",
+              "git add *": "allow",
+              "git commit *": "allow",
+              "make *": "allow",
+              "python -m pytest*": "allow"
+            },
+            "web_search": "allow",
+            "tool": "ask",
+            "skill": "allow"
+          }
+        },
+        "edits": {
+          "label": "Edits",
+          "color": "mdLink",
+          "permission": {
+            "path": {
+              "*": "allow"
+            },
+            "external_directory": "ask",
+            "read": "allow",
+            "grep": "allow",
+            "find": "allow",
+            "ls": "allow",
+            "write": "allow",
+            "edit": "allow",
+            "bash": {
+              "*": "ask"
+            },
+            "web_search": "ask",
+            "tool": "ask",
+            "skill": "ask"
+          }
+        },
+        "accept": {
+          "label": "Accept",
+          "color": "error",
+          "bypassProtectedPaths": true,
+          "permission": {
+            "path": {
+              "*": "allow"
+            },
+            "external_directory": "allow",
+            "read": "allow",
+            "write": "allow",
+            "edit": "allow",
+            "grep": "allow",
+            "find": "allow",
+            "ls": "allow",
+            "bash": {
+              "*": "allow"
+            },
+            "web_search": "allow",
+            "tool": "allow",
+            "skill": "allow"
+          }
+        }
+      }
+    }
   }
 ]

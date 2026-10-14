@@ -32,7 +32,7 @@ bash 门控使用真正的 **tree-sitter AST**（不是正则），OS 沙箱由
 pi install npm:qings-pi-modes
 ```
 
-- `pi install npm:qings-pi-modes@1.2.0` —— 锁定版本（`pi update` 不会越过它）
+- `pi install npm:qings-pi-modes@1.2.0` —— 锁定版本（1.3.0 发布后改为 @1.3.0）（`pi update` 不会越过它）
 - `pi install -l npm:qings-pi-modes` —— 项目级安装（`.pi/` 内，可与团队共享）
 - `pi -e npm:qings-pi-modes` —— 不写入配置，单次试用
 
