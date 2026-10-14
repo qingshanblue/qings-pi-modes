@@ -27,6 +27,12 @@ to match.
   - `modes.auto.systemPrompt` rewritten to describe the new division of labor.
 - **Wider default network allowlist**: `*.githubusercontent.com` (GitHub's
   release/objects CDN) and `cache.nixos.org` / `nixos.org` (NixOS hosts).
+- **Opt-in `aiGatesUnsandboxed` mode flag**: a custom classifier mode may let
+  the AI gate fully inspectable, non-privileged actions while the sandbox is
+  off/unavailable. Privilege escalation, escapes from an enforcing sandbox,
+  opaque/truncated/script-referencing payloads, protected paths, and
+  file-tool writes/edits outside the project remain human-only or hard-blocked;
+  the flag is off by default.
 
 ### Security
 - **File-tool writes/edits outside the project are no longer judged by the AI

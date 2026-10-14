@@ -67,6 +67,19 @@ test("buildReviewPrompt: includes action fields and truncates long input", () =>
   assert.match(long.content, /truncated/);
 });
 
+test("buildReviewPrompt: unsandboxed review includes script payload and stronger warning", () => {
+  const out = buildReviewPrompt(
+    subject({
+      unsandboxed: true,
+      scripts: [{ path: "/project/helper.sh", content: "echo safe", truncated: false }],
+    }),
+  );
+  assert.match(out.systemPrompt, /OUTSIDE any sandbox/i);
+  assert.match(out.content, /unsandboxed: yes/);
+  assert.match(out.content, /script \/project\/helper\.sh content/);
+  assert.match(out.content, /echo safe/);
+});
+
 test("parseVerdict: strict JSON, fenced JSON, and failures", () => {
   assert.deepEqual(parseVerdict('{"allow":true,"risk":"low","reason":"fine"}'), { allow: true, risk: "low", reason: "fine" });
   // surrounding prose / code fence

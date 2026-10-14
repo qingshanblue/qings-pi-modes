@@ -55,7 +55,7 @@ import path from "node:path";
 import { askWithSession, BlockedPaths, type ApprovalUI, type DenyOption, SessionApprovals } from "./approvals.ts";
 import { sandboxAwarenessPrompt } from "./awareness.ts";
 import { bashExecPlan, bashGate, isBenignOutsideRead } from "./bash-enforce.ts";
-import { analyzeBash, escapeTargetFromReason, escapingPaths } from "./bash-parse.ts";
+import { analyzeBash, escapeTargetFromReason, escapingPaths, reviewBashScripts, type ScriptReview } from "./bash-parse.ts";
 import { isSafeBashChain } from "./safe-command.ts";
 import {
   auditStaleDefaults,
@@ -135,11 +135,20 @@ interface AskReview {
   input: unknown;
   /** True when the target lies outside the project. */
   isOutside?: boolean;
+  /** The command would run outside an enforcing sandbox. */
+  unsandboxed?: boolean;
+  /** True for privilege escalation — always human, even in the opt-in raw mode. */
+  privilege?: boolean;
+  /** True for a genuine escape from an enforcing sandbox — always human. */
+  sandboxEscape?: boolean;
+  /** False when the reviewer cannot fully inspect the payload (scripts, truncation, substitution). */
+  inspectable?: boolean;
+  /** Direct script payloads included in the classifier context. */
+  scripts?: ScriptReview[];
   /**
-   * Set on every prompt that would run the command OUTSIDE the sandbox (an
-   * escape/privilege ask, or any ask in a mode whose sandbox is off). Such an
-   * ask is never handed to the classifier — approving it is the strongest grant
-   * in the system — so this forces the human prompt (a headless session denies).
+   * Set on every prompt that would run the command OUTSIDE the sandbox. The
+   * default is human-only; a mode with `aiGatesUnsandboxed` may send a fully
+   * inspectable, non-privileged, non-sandbox-escape case to the classifier.
    */
   escalateToHuman?: boolean;
 }
@@ -348,12 +357,15 @@ export default async function (pi: ExtensionAPI) {
       );
     const cfg = normalizeClassifierConfig(config.classifier);
     if (!cfg.enabled) return humanPrompt();
-    // An escape (out-of-project path or privilege escalation) — and any ask that
-    // would run the command OUTSIDE the sandbox — is never approved by the
-    // classifier: that is the strongest grant in the system, and the reviewer
-    // reads model-authored text. It always goes to the human; with no UI
-    // (headless) askWithSession denies it outright.
-    if (review.escalateToHuman) return humanPrompt();
+    // Default: anything that would run outside the sandbox is human-only. An
+    // explicit mode-level `aiGatesUnsandboxed` opt-in may delegate only the
+    // fully inspectable, non-privileged, non-sandbox-escape subset to the AI.
+    // Privilege and escapes from an enforcing sandbox remain human-only.
+    if (review.escalateToHuman) {
+      if (review.privilege || review.sandboxEscape || !currentMode().aiGatesUnsandboxed || review.inspectable === false) {
+        return humanPrompt();
+      }
+    }
     const targets = Array.isArray(target) ? target : [target];
     const subject: ClassifierSubject = {
       mode: modeName,
@@ -364,6 +376,8 @@ export default async function (pi: ExtensionAPI) {
       cwd: ctx.cwd ?? root,
       isOutside: review.isOutside,
       inBounds: sandboxAllowedRoots(root, effectiveSandbox(currentMode())),
+      scripts: review.scripts,
+      unsandboxed: review.unsandboxed,
       recentUserRequest: recentUserRequests(ctx),
     };
     const key = subjectKey(subject, cfg.model);
@@ -1378,6 +1392,7 @@ export default async function (pi: ExtensionAPI) {
         // saves a classifier call for every whitelisted bash in auto mode.
         if (effective === "ask" && !outside && isSafeBashChain(analysis.commands, command)) return undefined;
         const gate = bashGate(effective, outside, false, sandbox.ready);
+        const scriptReview = reviewBashScripts(analysis.commands, root, command, analysis.usedFallback, bounds);
         if (gate.kind === "block") return { block: true, reason: gate.reason };
         if (gate.kind === "prompt") {
           // Without an AST parse, scope a session grant to the exact command.
@@ -1386,6 +1401,11 @@ export default async function (pi: ExtensionAPI) {
               tool: "bash",
               input: { command },
               escalateToHuman: gate.onApproveUnsandboxed,
+              privilege: outside?.startsWith("privilege escalation") === true,
+              sandboxEscape: false,
+              inspectable: scriptReview.inspectable,
+              scripts: scriptReview.scripts,
+              unsandboxed: gate.onApproveUnsandboxed,
             }))
           ) {
             return { block: true, reason: gate.reason };
@@ -1403,6 +1423,7 @@ export default async function (pi: ExtensionAPI) {
       const action: Action =
         analysis.commands.length > 0 ? decideBashChain(m, analysis.commands) : decide(m, "bash", command);
       const safeChain = isSafeBashChain(analysis.commands, command);
+      const scriptReview = reviewBashScripts(analysis.commands, root, command, analysis.usedFallback, bounds);
       // Tier 1 fast path: a known read-only command in-bounds runs without prompting
       // or classifier review (shared by Ask / Edits / Auto). Escapes never qualify.
       if (action === "ask" && !analysis.outsideReason && safeChain) {
@@ -1471,6 +1492,11 @@ export default async function (pi: ExtensionAPI) {
             input: { command },
             isOutside: Boolean(analysis.outsideReason),
             escalateToHuman: gate.onApproveUnsandboxed,
+            privilege: analysis.outsideReason?.startsWith("privilege escalation") === true,
+            sandboxEscape: Boolean(analysis.outsideReason) && sandbox.ready && modeSandbox(m).enabled,
+            inspectable: scriptReview.inspectable,
+            scripts: scriptReview.scripts,
+            unsandboxed: gate.onApproveUnsandboxed,
           }))
         )
           return { block: true, reason: gate.reason };
@@ -1526,6 +1552,8 @@ export default async function (pi: ExtensionAPI) {
             input: { path },
             isOutside: outside,
             escalateToHuman: escalate,
+            inspectable: true,
+            unsandboxed: outside && (surface === "write" || surface === "edit"),
           }))
         )
           return { block: true, reason };

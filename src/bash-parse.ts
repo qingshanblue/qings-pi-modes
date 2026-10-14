@@ -19,11 +19,12 @@
  * the runtime.
  */
 
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { bashConfirmReason, normalizeBashToken, pathPartOfToken, PRIVILEGE_RE, tokenTarget } from "./heuristics.ts";
-import { bashPathEscapes, SAFE_OUTSIDE_RE } from "./paths.ts";
+import { bashPathEscapes, isOutside, isProtectedPath, SAFE_OUTSIDE_RE } from "./paths.ts";
 
 /** One command extracted from a bash line. */
 export interface BashCommand {
@@ -398,6 +399,118 @@ export function escapeTargetFromReason(reason: string | undefined, root: string)
   if (p.startsWith("/")) return p;
   if (p === "~" || p.startsWith("~/")) return path.join(os.homedir(), p.slice(1));
   return path.resolve(root, p);
+}
+
+// ---------------------------------------------------------------------------
+// Script payload review (for the aiGatesUnsandboxed classifier gate)
+// ---------------------------------------------------------------------------
+
+/** Interpreters whose first non-flag argument is a script file. */
+const SCRIPT_INTERPRETERS = new Set(["bash", "sh", "zsh", "dash", "ksh", "python", "python3", "pypy", "node", "ruby", "perl"]);
+
+/** Inline-script spellings whose payload is already visible in the command line. */
+const INLINE_ARG_RE = /^-[A-Za-z]*c[A-Za-z]*$/; // shell -c family (also python -c)
+
+/** Content of a script the command would execute, bounded for the reviewer. */
+export interface ScriptReview {
+  /** Absolute path as resolved against the project root. */
+  path: string;
+  /** Bounded content (MAX_SCRIPT_REVIEW_CHARS). */
+  content: string;
+  /** True when the content was truncated — the payload tail is NOT visible. */
+  truncated?: boolean;
+}
+
+/** Cap on a script's content included in the review. */
+export const MAX_SCRIPT_REVIEW_CHARS = 8192;
+
+/**
+ * Script files a command chain directly executes (one level deep):
+ * `./x.sh`, `/abs/x.sh`, `~/x.sh`, `bash|sh|python|node|ruby|perl <file>`,
+ * `source <file>`. Inline spellings (`bash -c`, `python -m`) are excluded —
+ * their payload is already visible to the reviewer.
+ */
+export function scriptFiles(commands: BashCommand[]): string[] {
+  const out = new Set<string>();
+  for (const original of commands) {
+    // Inspect the original and the command after known wrappers (`env bash x`,
+    // `time node x`, `find . -exec bash x`) so a wrapper cannot hide a script.
+    for (const c of [original, unwrapCommand(original)]) {
+      const base = path.basename(c.name);
+      if (c.name.includes("/")) {
+        out.add(c.name);
+        continue;
+      }
+      if (base === "source" || base === ".") {
+        const f = c.args[0];
+        if (f && !f.startsWith("-")) out.add(f);
+        continue;
+      }
+      if (!SCRIPT_INTERPRETERS.has(base)) continue;
+      if (c.args.some((a) => INLINE_ARG_RE.test(a) || a === "-e" || a === "-m" || a === "--eval" || a === "--module")) continue;
+      const file = c.args.find((a) => !a.startsWith("-"));
+      if (file) out.add(file);
+    }
+  }
+  return [...out];
+}
+
+/** Resolve a script path the way the escape detector resolves command paths. */
+export function resolveScriptPath(root: string, p: string): string {
+  const tok = normalizeBashToken(p);
+  if (tok.startsWith("/")) return tok;
+  if (tok === "~" || tok.startsWith("~/")) return path.join(os.homedir(), tok.slice(1));
+  return path.resolve(root, tok);
+}
+
+/**
+ * Patterns in a script's content that make it NOT fully inspectable: it
+ * executes or includes other files or computed code the reviewer cannot see
+ * (sourcing, eval, command substitution, piping into a shell, running another
+ * script). Conservative on purpose: erring here only costs a human prompt.
+ */
+const OPAQUE_SCRIPT_RE =
+  /\beval\b|(?:^|[;&|]\s*)\.\s+\S|(?:^|[;&|]\s*)source\s+\S|\$\(|`|\|\s*(?:ba|z|da|k)?sh\b|\b(?:ba|z|da|k)sh\s+\S|\bpython\d*\s+\S+|\bnode\s+\S+|\bruby\s+\S+|\bperl\s+\S+/m;
+
+function readScriptContent(abs: string): ScriptReview | undefined {
+  let raw: string;
+  try {
+    raw = readFileSync(abs, "utf8");
+  } catch {
+    return undefined;
+  }
+  if (raw.length <= MAX_SCRIPT_REVIEW_CHARS) return { path: abs, content: raw };
+  return { path: abs, content: raw.slice(0, MAX_SCRIPT_REVIEW_CHARS), truncated: true };
+}
+
+/**
+ * The payload of a command chain for the reviewer: bounded script contents
+ * plus whether the reviewer can FULLY inspect what would run. `inspectable`
+ * is false when the AST was unavailable, the raw line hides a substitution
+ * (`$(…)`/backticks), a script is unreadable or truncated, or a script itself
+ * executes/includes other files or computed code.
+ */
+export function reviewBashScripts(
+  commands: BashCommand[],
+  root: string,
+  raw: string,
+  usedFallback: boolean,
+  alsoInside: readonly string[] = [],
+): { scripts: ScriptReview[]; inspectable: boolean } {
+  const scripts: ScriptReview[] = [];
+  if (usedFallback) return { scripts, inspectable: false };
+  if (raw.includes("$(") || raw.includes("`")) return { scripts, inspectable: false };
+  for (const f of scriptFiles(commands)) {
+    const abs = resolveScriptPath(root, f);
+    // Never read an outside/protected script into the model context: it may be
+    // a credential-bearing file. A non-project script is therefore human-only.
+    if (isOutside(root, abs, alsoInside) || isProtectedPath(path.relative(root, abs))) return { scripts, inspectable: false };
+    const r = readScriptContent(abs);
+    if (!r) return { scripts, inspectable: false };
+    scripts.push(r);
+    if (r.truncated || OPAQUE_SCRIPT_RE.test(r.content)) return { scripts, inspectable: false };
+  }
+  return { scripts, inspectable: true };
 }
 
 /** A parser that turns a command string into commands (real or, in tests, fake). */

@@ -24,6 +24,7 @@
  */
 
 import { createHash } from "node:crypto";
+import type { ScriptReview } from "./bash-parse.ts";
 import type { Surface } from "./schema.ts";
 
 export interface ClassifierConfig {
@@ -100,6 +101,12 @@ export interface ClassifierSubject {
    * agent is expected to work, so the reviewer can tell routine edits from
    * out-of-project ones. */
   inBounds?: string[];
+  /** Script files the command would execute, with bounded content, so the
+   * reviewer judges the real payload instead of an innocent-looking line. */
+  scripts?: ScriptReview[];
+  /** The pending action would run with NO sandbox containment: the reviewer is
+   * the sole gate (aiGatesUnsandboxed modes only). */
+  unsandboxed?: boolean;
   /** The user's most recent request — the authorization context. Without it the
    * reviewer cannot tell a legitimate edit from a rogue one and over-denies. */
   recentUserRequest?: string;
@@ -127,6 +134,16 @@ const SYSTEM_PROMPT = [
   '{"allow": true|false, "risk": "low"|"medium"|"high"|"critical", "reason": "<short>"}',
 ].join("\n");
 
+const UNSANDBOXED_SUFFIX = [
+  "",
+  "The pending action will run OUTSIDE any sandbox — there is NO containment,",
+  "and you are the SOLE gate. Deny anything you cannot fully verify: scripts",
+  "whose content is truncated or that reference other files, opaque or computed",
+  "payloads, credential/secret access, data exfiltration, destructive or",
+  "irreversible operations, and anything that runs as another user or elevates",
+  "privileges.",
+].join("\n");
+
 /** Render the tool input as bounded JSON for the prompt. */
 function boundedInput(input: unknown, maxChars: number): string {
   let text: string;
@@ -150,6 +167,7 @@ export function buildReviewPrompt(subject: ClassifierSubject, maxInputChars = DE
     `cwd: ${subject.cwd}`,
   ];
   if (subject.inBounds && subject.inBounds.length > 0) lines.push(`in-bounds roots: ${subject.inBounds.join(", ")}`);
+  if (subject.unsandboxed) lines.push("unsandboxed: yes — NO containment; the action runs with full user permissions, you are the sole gate");
   if (subject.recentUserRequest) {
     lines.push("user's recent requests:", subject.recentUserRequest);
   }
@@ -160,7 +178,13 @@ export function buildReviewPrompt(subject: ClassifierSubject, maxInputChars = DE
   );
   if (subject.targets.length > 0) lines.push(`targets: ${subject.targets.join(", ")}`);
   lines.push("action input:", boundedInput(subject.input, maxInputChars));
-  return { systemPrompt: SYSTEM_PROMPT, content: lines.join("\n") };
+  for (const s of subject.scripts ?? []) {
+    lines.push(`script ${s.path} content${s.truncated ? " (TRUNCATED — the tail is not visible)" : ""}:`, boundedInput(s.content, maxInputChars));
+  }
+  return {
+    systemPrompt: subject.unsandboxed ? SYSTEM_PROMPT + "\n\n" + UNSANDBOXED_SUFFIX : SYSTEM_PROMPT,
+    content: lines.join("\n"),
+  };
 }
 
 /** Pull the assistant text out of a completion result (string or content blocks). */
@@ -304,7 +328,9 @@ export function subjectKey(subject: ClassifierSubject, modelRef: string): string
         subject.targets.join("\u0000"),
         input,
         subject.isOutside ? "1" : "0",
+        subject.unsandboxed ? "1" : "0",
         (subject.inBounds ?? []).join("\u0000"),
+        (subject.scripts ?? []).map((s) => `${s.path}${s.truncated ? "+truncated" : ""}`).join("\u0000"),
         subject.recentUserRequest ?? "",
       ].join("\u0001"),
     )

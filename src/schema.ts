@@ -152,6 +152,17 @@ export interface ModeDef {
    */
   classifier?: boolean;
   /**
+   * Opt-in "I trust this machine" posture (default false): let the AI
+   * classifier gate bash asks that will run UNSANDBOXED (sandbox off or
+   * unavailable) instead of escalating them to the human. Only meaningful
+   * with `classifier: true`. Even when set: privilege escalation and
+   * sandbox-on escapes are ALWAYS human, and payloads the reviewer cannot
+   * fully inspect (scripts referencing other files, truncated or opaque
+   * content) stay with the human. The AI gate is a heuristic, not a boundary —
+   * its strength is the review model's strength. Project configs cannot set it.
+   */
+  aiGatesUnsandboxed?: boolean;
+  /**
    * Internal (NOT part of the JSON schema): a project config's tighten-only
    * permission overlay, set by the loader. The resolver folds it in as an extra
    * most-restrictive layer, so it can only tighten the base policy, never loosen

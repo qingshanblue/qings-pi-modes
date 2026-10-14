@@ -1735,3 +1735,43 @@ test("automode: whitelisted bash families never reach the classifier", { skip },
     h.cleanup();
   }
 });
+
+test("automode: aiGatesUnsandboxed opts in to inspectable degraded bash only", { skip }, async () => {
+  const registry = classifierRegistry(allowReply);
+  const h = await setup({ permFlag: "auto", modelRegistry: registry, model: { id: "m", provider: "p" } });
+  try {
+    const dir = path.join(h.agentDir, "permission-mode");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "permission-mode.json"), JSON.stringify({ modes: { auto: { aiGatesUnsandboxed: true } } }));
+    await h.pi.emit("session_start", {}, h.ctx);
+    await h.pi.commands.get("sandbox")!("off", h.ctx);
+
+    // A direct, inspectable non-privileged command is classifier-gated despite
+    // the sandbox being off.
+    assert.equal(await h.call("bash", { command: "node --version" }), undefined);
+    assert.equal(registry.calls.length, 1);
+    assert.equal(h.ctx.prompts.length, 0);
+
+    // Privilege escalation remains human-only.
+    h.ctx.answers.push("Deny");
+    assert.equal((await h.call("bash", { command: "sudo -n true" }))?.block, true);
+    assert.equal(registry.calls.length, 1);
+    assert.equal(h.ctx.prompts.length, 1);
+
+    // An opaque substitution is not fully inspectable, so it remains human-only.
+    h.ctx.answers.push("Deny");
+    assert.equal((await h.call("bash", { command: "bash -c \"$(cat /etc/hostname)\"" }))?.block, true);
+    assert.equal(registry.calls.length, 1);
+    assert.equal(h.ctx.prompts.length, 2);
+
+    // A directly executed, fully visible script is included in the classifier
+    // context and can be AI-approved.
+    writeFileSync(path.join(h.root, "helper.sh"), "echo safe\\n");
+    assert.equal(await h.call("bash", { command: "bash helper.sh" }), undefined);
+    assert.equal(registry.calls.length, 2);
+    assert.match(registry.calls[1].context.messages[0].content, /script .*helper\.sh content/);
+    assert.match(registry.calls[1].context.messages[0].content, /echo safe/);
+  } finally {
+    h.cleanup();
+  }
+});

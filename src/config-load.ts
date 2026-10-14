@@ -345,6 +345,10 @@ function mergeGlobal(base: PermissionModeConfig, over: Partial<PermissionModeCon
       onError(`permission-mode: ignoring classifier in ${where}: must be a boolean`);
       delete m.classifier;
     }
+    if (raw.aiGatesUnsandboxed !== undefined && typeof raw.aiGatesUnsandboxed !== "boolean") {
+      onError(`permission-mode: ignoring aiGatesUnsandboxed in ${where}: must be a boolean`);
+      delete m.aiGatesUnsandboxed;
+    }
     if (raw.hideTools !== undefined && !isStringArray(raw.hideTools)) {
       onError(`permission-mode: ignoring hideTools in ${where}: must be a string array`);
       delete m.hideTools;
@@ -580,6 +584,9 @@ function applyProject(config: PermissionModeConfig, project: unknown, onError: O
       }
       if (raw.classifier !== undefined) {
         onError(`permission-mode: project config cannot set classifier for mode "${name}"; ignoring`);
+      }
+      if (raw.aiGatesUnsandboxed !== undefined) {
+        onError(`permission-mode: project config cannot set aiGatesUnsandboxed for mode "${name}"; ignoring`);
       }
       if (raw.permission !== undefined) {
         // Attach as a most-restrictive overlay - provably tighten-only.

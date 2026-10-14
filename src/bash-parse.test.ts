@@ -13,6 +13,8 @@ import {
   isPrivilegeEscalation,
   outsideReasonFromCommands,
   policyAliases,
+  reviewBashScripts,
+  scriptFiles,
   type SyntaxNodeLike,
   unwrapCommand,
 } from "./bash-parse.ts";
@@ -356,6 +358,39 @@ test("bare-word symlinks: an argument naming an in-project symlink to outside is
     assert.equal(outsideReasonFromCommands([c("cat", "missing")], root), undefined);
     // The block candidates name the link; blockablePath canonicalizes it to the real target.
     assert.deepEqual(escapingPaths([c("cat", "data", "a.txt")], root), [path.join(root, "data")]);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("reviewBashScripts: visible scripts are inspectable; opaque/truncated payloads are not", () => {
+  const base = mkdtempSync(path.join(tmpdir(), "perm-script-review-"));
+  try {
+    const root = path.join(base, "proj");
+    mkdirSync(root, { recursive: true });
+    const helper = path.join(root, "helper.sh");
+    writeFileSync(helper, "echo safe\\n");
+    const c = (name: string, ...args: string[]): BashCommand => ({ name, args, isNested: false });
+    const commands = [c("bash", "helper.sh")];
+    assert.deepEqual(scriptFiles(commands), ["helper.sh"]);
+    const safe = reviewBashScripts(commands, root, "bash helper.sh", false);
+    assert.equal(safe.inspectable, true);
+    assert.equal(safe.scripts[0]?.content, "echo safe\\n");
+
+    writeFileSync(helper, "eval $CMD\\n");
+    assert.equal(reviewBashScripts(commands, root, "bash helper.sh", false).inspectable, false);
+    writeFileSync(helper, "x".repeat(9000));
+    const truncated = reviewBashScripts(commands, root, "bash helper.sh", false);
+    assert.equal(truncated.inspectable, false);
+    assert.equal(truncated.scripts[0]?.truncated, true);
+    assert.equal(reviewBashScripts(commands, root, "bash -c $(cat helper.sh)", false).inspectable, false);
+    assert.equal(reviewBashScripts(commands, root, "bash helper.sh", true).inspectable, false);
+
+    const outside = path.join(base, "outside.sh");
+    writeFileSync(outside, "echo outside\\n");
+    const outsideReview = reviewBashScripts([c("bash", outside)], root, `bash ${outside}`, false);
+    assert.equal(outsideReview.inspectable, false);
+    assert.equal(outsideReview.scripts.length, 0, "outside script content is not sent to the model");
   } finally {
     rmSync(base, { recursive: true, force: true });
   }
